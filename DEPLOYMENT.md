@@ -1,11 +1,13 @@
 # Deployment — Vercel (frontend) + Render (backend + Postgres)
 
-The repo is configured for this split: the Next.js app deploys on Vercel; the Express API runs as a Render Web Service, the background worker as a separate Render Worker service, and the database on Render PostgreSQL (all defined in `render.yaml`). `frontend/vercel.json` and `render.yaml` at the repo root contain the build and start commands.
+The repo is configured for this split: the Next.js app deploys on Vercel; the Express API runs as a Render Web Service, the background worker as a separate Render Worker service, and PostgreSQL is external on **Neon** (free tier works). `render.yaml` at the repo root defines both backend services and every environment variable; `frontend/vercel.json` holds the frontend build config.
 
-## 1. Database — Render PostgreSQL
+## 1. Database — Neon PostgreSQL
 
-1. Create a **PostgreSQL** instance on Render (free tier works for evaluation; pick a paid tier for real use).
-2. Note the **Internal Database URL** (used when the API runs on Render) and the **External URL** (for migrations from your machine).
+1. Create a project on [Neon](https://neon.tech) (free tier works).
+2. Open the Connect dialog with **Connection pooling** ON: the string whose host ends in `-pooler` is `DATABASE_URL` (app runtime).
+3. The same string with `-pooler` removed from the host is `DIRECT_URL` — migrations cannot run over PgBouncer, so Prisma uses `directUrl` for `prisma migrate deploy`.
+4. Migrations run automatically in the backend start command on every deploy — no manual schema step.
 
 ## 2. Object storage (required in production)
 
@@ -21,8 +23,8 @@ Demo documents from the seed dataset need no storage — they carry their conten
 
 1. **New → Web Service**, connect the repository.
 2. Root directory: `backend` (or rely on `render.yaml` from the repo root).
-3. Build command: `npm ci && npm run build` (`prisma generate` + `tsc`, matching `render.yaml`)
-   — migrations run in the start command on every deploy (safe).
+3. Build command: `npm ci --include=dev && npm run build` (`prisma generate` + `tsc`, matching `render.yaml`)
+   — `--include=dev` is required because `NODE_ENV=production` makes npm skip devDependencies, and `prisma`/`typescript` are devDependencies.
 4. Start command: `npx prisma migrate deploy && node dist/index.js` — runs migrations, then the API only. The background worker is a separate service (step 5).
 5. Worker — Render Background Worker: `render.yaml` defines `lumen-worker` (same build; start command `node dist/worker.js`). If configuring manually: **New → Background Worker**, same repo, root directory `backend`, and the same env vars as the API — `AUTH_SECRET` must be identical. Document processing, extraction, questionnaire drafting, and scheduled reports do not run until this service is up.
 6. Environment: fill every variable from `backend/.env.example`:
@@ -57,5 +59,5 @@ Demo documents from the seed dataset need no storage — they carry their conten
 
 * **Migrations**: `prisma migrate deploy` runs in the start command, so schema changes ship atomically with the code that needs them.
 * **Worker**: runs as its own Render service (`lumen-worker`, start `node dist/worker.js`) with the same env as the API (`AUTH_SECRET` must match). Locally, run it alongside the API with `npm run dev:worker`.
-* **Backups**: enable Render Postgres automated backups (paid tiers) and version your bucket.
+* **Backups**: Neon includes point-in-time restore on its plans — check your branch's history retention; version your bucket.
 * **Scaling**: the API is stateless (tokens are JWTs, files in object storage) — scale Render instances horizontally freely; the DB is the bottleneck.
