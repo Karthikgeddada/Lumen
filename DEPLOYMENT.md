@@ -1,6 +1,6 @@
 # Deployment — Vercel (frontend) + Render (backend + Postgres)
 
-The repo is configured for this split: the Next.js app deploys on Vercel; the Express API runs as a Render Web Service, the background worker as a separate Render Worker service, and PostgreSQL is external on **Neon** (free tier works). `render.yaml` at the repo root defines both backend services and every environment variable; `frontend/vercel.json` holds the frontend build config.
+The repo is configured for this split: the Next.js app deploys on Vercel; the backend runs on Render as a **single free web service** hosting the API **and** the background worker together (no card required), and PostgreSQL is external on **Neon** (free tier works). `render.yaml` at the repo root defines the service and every environment variable; `frontend/vercel.json` holds the frontend build config.
 
 ## 1. Database — Neon PostgreSQL
 
@@ -19,17 +19,14 @@ Render's filesystem is ephemeral — uploaded documents must live in S3-compatib
 
 Demo documents from the seed dataset need no storage — they carry their content inline in the database.
 
-## 3. Backend — Render Web Service
+## 3. Backend — Render (free tier)
 
-> **Recommended: New → Blueprint.** Render reads `render.yaml` from the repo root and creates **both** services (`lumen-api` web + `lumen-worker` worker) in one step, with all build/start commands and env-var placeholders pre-filled. You only paste the secret values (`DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`, …) in the dashboard. The manual steps below are the equivalent if you prefer clicking through.
+> **No card required.** `render.yaml` defines a **single free web service** that runs the API **and** the background worker together (`scripts/start-all.js` spawns both; migrations run on boot). **New → Blueprint** is still the easiest path — a free-plan blueprint does not require payment info. Free-tier tradeoffs: the service sleeps after ~15 min without traffic (first request takes ~50s to wake) and background jobs pause while asleep. When you later have a working payment method, split into `lumen-api` (Web Service) + `lumen-worker` (Background Worker) for always-on processing — the two-service blueprint is in git history.
 
-1. **New → Web Service**, connect the repository.
-2. Root directory: `backend` (or rely on `render.yaml` from the repo root).
-3. Build command: `npm ci --include=dev && npm run build` (`prisma generate` + `tsc`, matching `render.yaml`)
-   — `--include=dev` is required because `NODE_ENV=production` makes npm skip devDependencies, and `prisma`/`typescript` are devDependencies.
-4. Start command: `npx prisma migrate deploy && node dist/index.js` — runs migrations, then the API only. The background worker is a separate service (step 5).
-5. Worker — Render Background Worker: `render.yaml` defines `lumen-worker` (same build; start command `node dist/worker.js`). If configuring manually: **New → Background Worker**, same repo, root directory `backend`, and the same env vars as the API — `AUTH_SECRET` must be identical. Document processing, extraction, questionnaire drafting, and scheduled reports do not run until this service is up.
-6. Environment: fill every variable from `backend/.env.example`:
+1. **New → Blueprint** (recommended) or **New → Web Service** manually.
+2. Manual settings: root directory `backend`; build `npm ci --include=dev && npm run build` (`prisma generate` + `tsc`) — `--include=dev` is required because `NODE_ENV=production` makes npm skip devDependencies, and `prisma`/`typescript` are devDependencies; start `npx prisma migrate deploy && node scripts/start-all.js`.
+3. If Render still asks for payment info, check the service shows **plan: free** — paid plans (starter / worker) are what trigger the card wall.
+4. Environment: fill every variable from `backend/.env.example`:
    * `DATABASE_URL` — the Neon **pooled** connection string (host ends in `-pooler`, from the Connect dialog with "Connection pooling" on), e.g. `postgresql://...@ep-xxx-pooler.../neondb?sslmode=require`
    * `DIRECT_URL` — the same Neon URL with `-pooler` removed from the host; used by `prisma migrate deploy` (migrations cannot run over PgBouncer)
    * `AUTH_SECRET` — 48+ random bytes (see ENVIRONMENT.md)
@@ -39,7 +36,7 @@ Demo documents from the seed dataset need no storage — they carry their conten
    * `AI_PROVIDER_API_KEY`, `AI_BASE_URL`, `AI_CHAT_MODEL`, `AI_EMBEDDING_MODEL`
    * `STORAGE_*` — bucket from step 2
    * `NODE_ENV=production`, `MAIL_DEV_MODE` unset/false
-7. Deploy. Verify `https://<service>.onrender.com/api/health` returns `{ ok: true }`. Seed the demo dataset once: open the `lumen-api` service's **Shell** in the Render dashboard and run `npx prisma db seed` (idempotent — it only inserts what's missing).
+5. Deploy. Verify `https://<service>.onrender.com/api/health` returns `{ ok: true }`. Seed the demo dataset once: open the `lumen-api` service's **Shell** in the Render dashboard and run `npx prisma db seed` (idempotent — it only inserts what's missing).
 
 ## 4. Frontend — Vercel
 
@@ -60,6 +57,6 @@ Demo documents from the seed dataset need no storage — they carry their conten
 ## Operations notes
 
 * **Migrations**: `prisma migrate deploy` runs in the start command, so schema changes ship atomically with the code that needs them.
-* **Worker**: runs as its own Render service (`lumen-worker`, start `node dist/worker.js`) with the same env as the API (`AUTH_SECRET` must match). Locally, run it alongside the API with `npm run dev:worker`.
+* **Worker**: on the free tier it runs inside the same service as the API — `scripts/start-all.js` spawns `dist/index.js` and `dist/worker.js`; if either process dies, both restart together. Locally, run them separately with `npm run dev` + `npm run dev:worker`.
 * **Backups**: Neon includes point-in-time restore on its plans — check your branch's history retention; version your bucket.
 * **Scaling**: the API is stateless (tokens are JWTs, files in object storage) — scale Render instances horizontally freely; the DB is the bottleneck.

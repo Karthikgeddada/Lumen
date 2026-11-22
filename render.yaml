@@ -1,16 +1,17 @@
-# Render blueprint — deploys the Lumen backend (web) + background worker.
+# Render blueprint — free tier: one web service hosting the API and the background worker together.
 # PostgreSQL is external (Neon); set DATABASE_URL + DIRECT_URL as secrets in the dashboard.
 # Docs: https://render.com/docs/blueprint-spec
-# After the first deploy, fill in the sync:false secrets in the Render dashboard.
+# Free tier: sleeps after ~15 min idle (cold start ~50s); background jobs pause while asleep.
+# The paid two-service blueprint (separate Background Worker) is preserved in git history.
 
 services:
   - type: web
     name: lumen-api
     runtime: node
-    plan: starter
-    region: oregon
+    plan: free
+    region: singapore # closest free region to India; switch to oregon if unavailable on free
     buildCommand: npm ci --include=dev && npx prisma generate && npm run build
-    startCommand: npx prisma migrate deploy && node dist/index.js
+    startCommand: npx prisma migrate deploy && node scripts/start-all.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -38,48 +39,6 @@ services:
         sync: false
       - key: MAIL_DEV_MODE
         value: "false"
-      - key: AI_PROVIDER_API_KEY
-        sync: false
-      - key: AI_BASE_URL
-        sync: false
-      - key: AI_CHAT_MODEL
-        sync: false
-      - key: AI_EMBEDDING_MODEL
-        sync: false
-      - key: STORAGE_ENDPOINT
-        sync: false
-      - key: STORAGE_REGION
-        sync: false
-      - key: STORAGE_BUCKET
-        sync: false
-      - key: STORAGE_ACCESS_KEY
-        sync: false
-      - key: STORAGE_SECRET_KEY
-        sync: false
-      - key: MAX_UPLOAD_MB
-        value: "500"
-
-  - type: worker
-    name: lumen-worker
-    runtime: node
-    plan: starter
-    region: oregon
-    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
-    startCommand: node dist/worker.js
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        sync: false # Neon POOLED connection string (host ends in -pooler), e.g. postgresql://...@ep-xxx-pooler.../neondb?sslmode=require
-      - key: DIRECT_URL
-        sync: false # Neon DIRECT connection string (same host WITHOUT -pooler) — used by prisma migrate deploy
-      - key: AUTH_SECRET
-        sync: false # reuse the same value as lumen-api
-      - key: FRONTEND_URL
-        sync: false
-      - key: ALLOWED_ORIGINS
-        sync: false
       - key: AI_PROVIDER_API_KEY
         sync: false
       - key: AI_BASE_URL
