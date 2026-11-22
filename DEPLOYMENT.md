@@ -26,7 +26,8 @@ Demo documents from the seed dataset need no storage — they carry their conten
 4. Start command: `npx prisma migrate deploy && node dist/index.js` — runs migrations, then the API only. The background worker is a separate service (step 5).
 5. Worker — Render Background Worker: `render.yaml` defines `lumen-worker` (same build; start command `node dist/worker.js`). If configuring manually: **New → Background Worker**, same repo, root directory `backend`, and the same env vars as the API — `AUTH_SECRET` must be identical. Document processing, extraction, questionnaire drafting, and scheduled reports do not run until this service is up.
 6. Environment: fill every variable from `backend/.env.example`:
-   * `DATABASE_URL` — the **Internal** Render Postgres URL (+ `?sslmode=require` if the provider requires it)
+   * `DATABASE_URL` — the Neon **pooled** connection string (host ends in `-pooler`, from the Connect dialog with "Connection pooling" on), e.g. `postgresql://...@ep-xxx-pooler.../neondb?sslmode=require`
+   * `DIRECT_URL` — the same Neon URL with `-pooler` removed from the host; used by `prisma migrate deploy` (migrations cannot run over PgBouncer)
    * `AUTH_SECRET` — 48+ random bytes (see ENVIRONMENT.md)
    * `FRONTEND_URL` — your Vercel URL (set after the frontend deploy in §4, then re-deploy the backend)
    * `ALLOWED_ORIGINS` — same URL, plus `https://*.vercel.app` preview patterns if wanted
