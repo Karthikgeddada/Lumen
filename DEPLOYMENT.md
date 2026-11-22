@@ -13,9 +13,9 @@ The repo is configured for this split: the Next.js app deploys on Vercel; the ba
 
 Render's filesystem is ephemeral — uploaded documents must live in S3-compatible storage:
 
-1. Create a bucket (AWS S3, Cloudflare R2, Backblaze B2, …).
-2. Create access keys limited to that bucket (put/get/delete).
-3. Fill `STORAGE_*` variables in the service env (see ENVIRONMENT.md).
+1. **AWS S3**: Create a bucket (e.g. `lumen-docs`, any region — keep "Block all public access" ON; the app uses signed URLs, nothing public).
+2. IAM → Users → create `lumen-backend` (no console access) → attach `AmazonS3FullAccess` → create an **access key** ("Application running outside AWS").
+3. Env values: `STORAGE_ENDPOINT=https://s3.<region>.amazonaws.com` (e.g. `https://s3.ap-southeast-2.amazonaws.com`), `STORAGE_REGION=<region>`, `STORAGE_BUCKET=<bucket>`, plus `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY`. (The S3 client auto-detects AWS endpoints and uses virtual-hosted style; Cloudflare R2 / Backblaze B2 work too via path style — set their endpoint + region accordingly.)
 
 Demo documents from the seed dataset need no storage — they carry their content inline in the database.
 
