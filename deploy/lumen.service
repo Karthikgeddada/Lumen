@@ -1,0 +1,20 @@
+[Unit]
+Description=Lumen backend (API + background worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=lumen
+WorkingDirectory=/opt/lumen/repo/backend
+EnvironmentFile=/opt/lumen/.env
+Environment=NODE_ENV=production
+Environment=PORT=4000
+ExecStartPre=/bin/bash -c 'set -a; . /opt/lumen/.env; set +a; npx prisma migrate deploy'
+ExecStart=/usr/bin/node scripts/start-all.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
