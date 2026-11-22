@@ -1,12 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '../../lib/api';
 import { ErrorBanner, Field } from '../../components/ui';
 
 export default function Reset() {
+  return (
+    <Suspense fallback={null}>
+      <ResetInner />
+    </Suspense>
+  );
+}
+
+function ResetInner() {
   const params = useSearchParams();
   const router = useRouter();
 

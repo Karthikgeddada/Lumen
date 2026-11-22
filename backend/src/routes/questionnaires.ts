@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { ApiError, asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace } from '../middleware/auth';
@@ -183,7 +184,10 @@ router.patch(
         required: z.boolean().optional(),
       })
       .parse(req.body);
-    const updated = await prisma.question.update({ where: { id: req.params.questionId }, data: body });
+    const updated = await prisma.question.update({
+      where: { id: req.params.questionId },
+      data: { ...body, options: body.options === null ? Prisma.DbNull : body.options },
+    });
     res.json({ question: updated });
   }),
 );

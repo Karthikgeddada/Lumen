@@ -186,7 +186,7 @@ export default function DocumentViewer() {
                   <div key={gi}>
                     <div style={{
                       padding: '10px 20px', background: 'var(--sunken)', borderBottom: '1px solid var(--border)',
-                      fontSize: 12, fontWeight: 650, letterSpacing: 0.02em, color: 'var(--text-secondary)',
+                      fontSize: 12, fontWeight: 650, letterSpacing: '0.02em', color: 'var(--text-secondary)',
                       display: 'flex', alignItems: 'center', gap: 8,
                     }}>
                       <ChevronRight size={12} /> {group.heading}

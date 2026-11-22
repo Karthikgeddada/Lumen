@@ -13,7 +13,7 @@ interface Overview {
   metrics: {
     key: string; label: string; unit: string;
     series: { period: string; value: number; derivation: string; sourceExcerpt: string | null; sourcePage: number | null }[];
-    delta?: { pct: number | from: number; to: number } | null;
+    delta?: { pct: number; from: number; to: number } | null;
     latest?: { period: string; value: number; derivation: string } | null;
   }[];
   quarters: string[];

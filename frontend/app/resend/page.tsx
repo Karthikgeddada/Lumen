@@ -1,12 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api } from '../../lib/api';
 import { ErrorBanner, Field } from '../../components/ui';
 
 export default function ResendVerification() {
+  return (
+    <Suspense fallback={null}>
+      <ResendVerificationInner />
+    </Suspense>
+  );
+}
+
+function ResendVerificationInner() {
   const params = useSearchParams();
   const [email, setEmail] = useState(params.get('email') ?? '');
   const [busy, setBusy] = useState(false);

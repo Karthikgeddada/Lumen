@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '../../lib/api';
@@ -12,6 +12,14 @@ const INDUSTRIES = ['Finance', 'Technology', 'Industrial', 'Legal', 'Research', 
 
 // Steps: welcome → workspace → invite team → first upload → done.
 export default function Onboarding() {
+  return (
+    <Suspense fallback={null}>
+      <OnboardingInner />
+    </Suspense>
+  );
+}
+
+function OnboardingInner() {
   const router = useRouter();
   const params = useSearchParams();
   const { user, reload } = useAuth();

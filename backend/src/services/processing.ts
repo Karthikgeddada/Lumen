@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { logger } from '../logger';
 import { getObject } from './storage';
@@ -85,7 +86,7 @@ export async function processDocument(documentId: string): Promise<void> {
       tableIdByIndex.set(i, created.id);
       if (t.rows.length) {
         await prisma.documentTableRow.createMany({
-          data: t.rows.slice(0, 10000).map((r) => ({ tableId: created.id, rowIndex: r.rowIndex, cells: r.cells as unknown[] })),
+          data: t.rows.slice(0, 10000).map((r) => ({ tableId: created.id, rowIndex: r.rowIndex, cells: r.cells as Prisma.InputJsonValue })),
         });
       }
     }

@@ -111,10 +111,12 @@ model User {
   deletedAt     DateTime?
 
   memberships     Membership[]
+  workspacesCreated Workspace[] @relation("WorkspaceCreator")
   sessions        Session[]
   verificationCodes VerificationCode[]
   notifications   Notification[]
   auditEvents     AuditEvent[]      @relation("AuditActor")
+  documents       Document[]
 
   @@index([email])
 }
@@ -122,7 +124,7 @@ model User {
 model Session {
   id               String    @id @default(cuid())
   userId           String
-  refreshTokenHash String
+  refreshTokenHash String @unique
   userAgent        String?
   ip               String?
   expiresAt        DateTime
@@ -132,7 +134,6 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([refreshTokenHash])
 }
 
 // Six-digit email verification codes and password-reset tokens.
@@ -264,6 +265,7 @@ model Document {
 
   workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   collection Collection?       @relation(fields: [collectionId], references: [id])
+  owner      User              @relation(fields: [ownerId], references: [id])
   sections  DocumentSection[]
   tables    DocumentTable[]
   chunks    DocumentChunk[]
@@ -417,6 +419,7 @@ model ExtractionTemplate {
   createdAt   DateTime @default(now())
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id])
+  tasks     ExtractionTask[]
 
   @@index([workspaceId])
 }

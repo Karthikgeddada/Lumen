@@ -53,7 +53,7 @@ export default function QuestionnaireDetail() {
   });
   const q = data?.questionnaire;
   const questions = data?.questions ?? [];
-  const sections = [...new Set(questions.map((x) => x.section))];
+  const sections = Array.from(new Set(questions.map((x) => x.section)));
 
   async function draft() {
     setDrafting(true); setError(null);
@@ -87,7 +87,7 @@ export default function QuestionnaireDetail() {
       </Link>
       <div className="page-head">
         <div>
-          <div className="page-title">{q.questionnaire.title}</div>
+          <div className="page-title">{q.title}</div>
           <div className="page-desc">
             {questions.length} questions · {answeredCount} answered
             {data?.rules?.lowConfidenceThreshold

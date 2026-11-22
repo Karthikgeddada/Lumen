@@ -17,7 +17,7 @@ interface Task {
   id: string; name: string; status: string; error: string | null;
   createdAt: string; completedAt: string | null;
   documentIds: string[];
-  _count: { fields: number; results: { where: { status: string } } } | { fields: number } & Record<string, unknown>;
+  _count: { fields: number } & Record<string, unknown>;
 }
 interface Template {
   id: string; name: string; description: string | null;
@@ -76,9 +76,7 @@ export default function Extraction() {
             <thead><tr><th>Extraction</th><th>Documents</th><th>Fields</th><th>Status</th><th>Needs review</th><th>Created</th><th></th></tr></thead>
             <tbody>
               {data.tasks.map((t) => {
-                const needsReview = (t._count as { results?: unknown }).results
-                  ? ((t._count as { results: { where: { status: string } } & number }).results as unknown as number)
-                  : 0;
+                const needsReview = Number((t._count as { results?: number }).results ?? 0);
                 return (
                   <tr key={t.id}>
                     <td className="strong">
@@ -140,7 +138,7 @@ function CreateExtraction({ open, onClose, workspaceId, canEdit, onCreated }: {
 
   function useTemplate(t: Template) {
     setName(t.name);
-    setFields(t.fields.map((f) => ({ ...f })));
+    setFields(t.fields.map((f) => ({ key: f.key, label: f.label, type: f.type as ExtractField['type'], description: f.description })));
   }
 
   async function create() {
@@ -308,7 +306,7 @@ function TaskDetail({ taskId, onClose, canEdit, canReview }: {
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {r.excerpt ? (
                         <button className="btn btn-ghost btn-sm" title="View evidence"
-                          onClick={() => setEditing({ ...r, value: r.value }); setEditValue(r.value ?? '');}>Evidence</button>
+                          onClick={() => { setEditing({ ...r, value: r.value }); setEditValue(r.value ?? ''); }}>Evidence</button>
                       ) : null}
                       {canReview && r.status !== 'VERIFIED' ? (
                         <button className="btn btn-ghost btn-sm" style={{ color: 'var(--success)' }}

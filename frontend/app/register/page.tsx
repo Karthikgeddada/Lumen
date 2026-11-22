@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, storeTokens } from '../../lib/api';
@@ -9,6 +9,14 @@ import { ErrorBanner, Field } from '../../components/ui';
 
 // Registration → inline 6-digit email verification → signed in.
 export default function Register() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterInner />
+    </Suspense>
+  );
+}
+
+function RegisterInner() {
   const router = useRouter();
   const params = useSearchParams();
   const { setUser } = useAuth();

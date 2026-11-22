@@ -113,7 +113,7 @@ export async function draftQuestionnaire(questionnaireId: string): Promise<void>
         },
         {
           role: 'user',
-          content: `Question: ${question.prompt}\n${question.options ? `Allowed choices: ${question.options.join(' / ')}` : ''}\n\nEvidence:\n${buildContext(chunks)}`,
+          content: `Question: ${question.prompt}\n${Array.isArray(question.options) ? `Allowed choices: ${question.options.join(' / ')}` : ''}\n\nEvidence:\n${buildContext(chunks)}`,
         },
       ]);
       if (res) {

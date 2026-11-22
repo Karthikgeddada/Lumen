@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 
 // ── strings & ids ──────────────────────────────────────────────────────────
@@ -84,7 +85,17 @@ export async function audit(input: {
   ip?: string;
 }) {
   try {
-    await prisma.auditEvent.create({ data: input });
+    await prisma.auditEvent.create({
+      data: {
+        workspaceId: input.workspaceId ?? undefined,
+        actorId: input.actorId ?? undefined,
+        action: input.action,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        meta: input.meta as Prisma.InputJsonValue | undefined,
+        ip: input.ip,
+      },
+    });
   } catch {
     /* audit must never break the request path */
   }

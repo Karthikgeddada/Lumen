@@ -73,14 +73,14 @@ export default function Assistant() {
   }, [messages, streamText]);
 
   async function newConversation() {
-    if (!wid) return;
+    if (!wid) throw new Error('No workspace selected');
     const res = await api<{ conversation: Conversation }>(`/api/workspaces/${wid}/conversations`, {
       method: 'POST',
       body: scope.docIds.length ? { documentIds: scope.docIds } : {},
     });
     setConversationId(res.conversation.id);
     setMessages([]);
-    router.replace(`/assistant?c=${res.conversation.id}`, undefined, { shallow: true });
+    router.replace(`/assistant?c=${res.conversation.id}`);
     return res.conversation.id;
   }
 
@@ -146,7 +146,7 @@ export default function Assistant() {
                 width: '100%', border: 'none', background: c.id === conversationId ? 'var(--surface)' : 'transparent',
                 cursor: 'pointer', boxShadow: c.id === conversationId ? 'var(--shadow-1)' : 'none',
                 alignItems: 'flex-start',
-              }} onClick={() => { setConversationId(c.id); router.replace(`/assistant?c=${c.id}`, undefined, { shallow: true }); }}>
+              }} onClick={() => { setConversationId(c.id); router.replace(`/assistant?c=${c.id}`); }}>
                 <MessagesSquare size={14} style={{ flexShrink: 0, marginTop: 2 }} />
                 <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {c.title}
