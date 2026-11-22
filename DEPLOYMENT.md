@@ -21,6 +21,8 @@ Demo documents from the seed dataset need no storage — they carry their conten
 
 ## 3. Backend — Render Web Service
 
+> **Recommended: New → Blueprint.** Render reads `render.yaml` from the repo root and creates **both** services (`lumen-api` web + `lumen-worker` worker) in one step, with all build/start commands and env-var placeholders pre-filled. You only paste the secret values (`DATABASE_URL`, `DIRECT_URL`, `AUTH_SECRET`, …) in the dashboard. The manual steps below are the equivalent if you prefer clicking through.
+
 1. **New → Web Service**, connect the repository.
 2. Root directory: `backend` (or rely on `render.yaml` from the repo root).
 3. Build command: `npm ci --include=dev && npm run build` (`prisma generate` + `tsc`, matching `render.yaml`)
