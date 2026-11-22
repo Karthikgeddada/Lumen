@@ -1,0 +1,668 @@
+// Lumen Document Intelligence — relational schema (PostgreSQL)
+// Every extracted value, citation and questionnaire answer stays linked to
+// its original document evidence (page, section, table row, sheet, cell).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  EDITOR
+  REVIEWER
+  VIEWER
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum DocumentStatus {
+  UPLOADING
+  QUEUED
+  PROCESSING
+  COMPLETED
+  NEEDS_REVIEW
+  FAILED
+}
+
+enum StructureKind {
+  HEADING
+  PARAGRAPH
+  FOOTNOTE
+  TABLE
+  SHEET
+}
+
+enum ExtractionTaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ResultStatus {
+  VERIFIED
+  NEEDS_REVIEW
+  MISSING
+  REJECTED
+}
+
+enum AnswerStatus {
+  AI_DRAFTED
+  APPROVED
+  NEEDS_REVIEW
+  MISSING
+  REJECTED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+enum CitationKind {
+  PAGE
+  SECTION
+  TABLE_ROW
+  FOOTNOTE
+  SHEET
+  CELL
+  PARAGRAPH
+}
+
+enum Derivation {
+  REPORTED
+  CALCULATED
+  AI_INFERRED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+// ── Identity & sessions ──────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  firstName     String
+  lastName      String
+  passwordHash  String
+  emailVerifiedAt DateTime?
+  lastLoginAt   DateTime?
+  onboardingStep Int       @default(0) // 0 done | 1 welcome | 2 workspace | 3 industry | 4 upload
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  memberships     Membership[]
+  sessions        Session[]
+  verificationCodes VerificationCode[]
+  notifications   Notification[]
+  auditEvents     AuditEvent[]      @relation("AuditActor")
+
+  @@index([email])
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String
+  userAgent        String?
+  ip               String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshTokenHash])
+}
+
+// Six-digit email verification codes and password-reset tokens.
+model VerificationCode {
+  id         String    @id @default(cuid())
+  userId      String
+  purpose     String // EMAIL_VERIFY | PASSWORD_RESET
+  codeHash    String
+  expiresAt  DateTime
+  consumedAt  DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}
+
+// ── Workspaces & tenancy ─────────────────────────────────────────────────
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  industry  String   @default("Business")
+  plan      String   @default("trial") // trial ends 14 days after createdAt
+  storageUsedBytes BigInt @default(0)
+  createdById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  createdBy       User              @relation("WorkspaceCreator", fields: [createdById], references: [id])
+  memberships     Membership[]
+  invitations     Invitation[]
+  settings        WorkspaceSetting[]
+  collections     Collection[]
+  documents       Document[]
+  conversations   Conversation[]
+  extractionTasks ExtractionTask[]
+  questionnaires  Questionnaire[]
+  entities       Entity[]
+  reports         Report[]
+  notifications   Notification[]
+  auditEvents     AuditEvent[]
+  templates       ExtractionTemplate[]
+
+  @@index([slug])
+}
+
+model WorkspaceSetting {
+  id          String @id @default(cuid())
+  workspaceId String
+  key         String // e.g. questionnaires.requireCitations
+  value        Json
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, key])
+}
+
+model Membership {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(EDITOR)
+  createdAt   DateTime      @default(now())
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Invitation {
+  id          String       @id @default(cuid())
+  workspaceId String
+  email       String
+  role        WorkspaceRole @default(EDITOR)
+  token       String       @unique
+  status      InviteStatus @default(PENDING)
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime     @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([email, status])
+}
+
+// ── Library & documents ──────────────────────────────────────────────────
+
+model Collection {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  createdById String
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@unique([workspaceId, name])
+}
+
+model Document {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  collectionId String?
+  name         String
+  fileType     String // pdf | docx | xlsx | csv | txt | doc | xls
+  mimeType     String
+  sizeBytes    BigInt
+  pageCount    Int?
+  status       DocumentStatus @default(UPLOADING)
+  error        String?
+  storageKey   String // object-storage key of the original file
+  ownerId      String
+  isDemo       Boolean        @default(false)
+  uploadedAt   DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  processedAt  DateTime?
+  deletedAt    DateTime?
+
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  collection Collection?       @relation(fields: [collectionId], references: [id])
+  sections  DocumentSection[]
+  tables    DocumentTable[]
+  chunks    DocumentChunk[]
+  summary   DocumentSummary?
+  citations Citation[]
+  results   ExtractionResult[]
+  evidence AnswerEvidence[]
+
+  @@index([workspaceId, status])
+  @@index([collectionId])
+  @@index([workspaceId, name])
+}
+
+// Structure extracted from a document: headings, paragraphs, footnotes.
+model DocumentSection {
+  id          String        @id @default(cuid())
+  documentId  String
+  kind        StructureKind
+  level       Int?          // heading level (1..n)
+  headingPath Json?         // breadcrumb array, e.g. ["3. Results", "3.2 Segments"]
+  page        Int?
+  order       Int
+  text        String @db.Text
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, order])
+  @@index([documentId, kind])
+}
+
+// Tables with preserved rows; spreadsheet sheets become tables too.
+model DocumentTable {
+  id         String  @id @default(cuid())
+  documentId String
+  sheet      String? // sheet name for spreadsheets
+  title      String?
+  page       Int?
+  order      Int
+  header     Json?   // column labels
+
+  document Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  rows     DocumentTableRow[]
+
+  @@index([documentId, order])
+}
+
+model DocumentTableRow {
+  id       String @id @default(cuid())
+  tableId  String
+  rowIndex Int
+  cells    Json   // array of cell values, aligned with DocumentTable.header
+
+  table DocumentTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tableId, rowIndex])
+}
+
+// Retrieval unit: keeps source pointers (page/heading/table) for citations.
+model DocumentChunk {
+  id          String  @id @default(cuid())
+  documentId  String
+  page        Int?
+  sheet       String?
+  headingPath Json?
+  tableId     String?
+  kind        CitationKind @default(PARAGRAPH)
+  text        String  @db.Text
+  embedding   Json?   // float array (re-ranked via cosine when present)
+  tokenEstimate Int
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+}
+
+model DocumentSummary {
+  id         String  @id @default(cuid())
+  documentId String  @unique
+  summary    String  @db.Text
+  keyFacts   Json    // [{label, value, page?}]
+  figures    Json    // [{label, value, unit, page?, tableRef?}]
+  model      String?
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+// ── Conversations & grounded answers ─────────────────────────────────────
+
+model Conversation {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  userId       String
+  title        String
+  documentIds  Json     @default("[]")
+  collectionId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@index([workspaceId, updatedAt])
+  @@index([userId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String      @db.Text
+  model          String?
+  latencyMs      Int?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  citations    Citation[]
+
+  @@index([conversationId, createdAt])
+}
+
+model Citation {
+  id          String       @id @default(cuid())
+  messageId   String
+  documentId  String
+  ref         Int          // visible citation number [n]
+  kind        CitationKind
+  page        Int?
+  sheet       String?
+  tableRef    String?      // e.g. "Table 2 · row 4" or "Sheet: Q3 · B7"
+  excerpt     String       @db.Text
+  chunkId     String?
+  createdAt   DateTime     @default(now())
+
+  message  Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([documentId])
+}
+
+// ── Data extraction ────────────────────────────────────────────────────
+
+model ExtractionTemplate {
+  id          String  @id @default(cuid())
+  workspaceId String? // null = built-in template shared by everyone
+  name        String
+  description String?
+  fields      Json    // [{key, label, type, description}]
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id])
+
+  @@index([workspaceId])
+}
+
+model ExtractionTask {
+  id          String              @id @default(cuid())
+  workspaceId String
+  name        String
+  templateId  String?
+  documentIds Json                @default("[]")
+  status      ExtractionTaskStatus @default(PENDING)
+  error       String?
+  createdById String
+  createdAt   DateTime            @default(now())
+  completedAt DateTime?
+  deletedAt   DateTime?
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  template  ExtractionTemplate? @relation(fields: [templateId], references: [id])
+  fields    ExtractionField[]
+  results   ExtractionResult[]
+
+  @@index([workspaceId, status])
+}
+
+model ExtractionField {
+  id        String @id @default(cuid())
+  taskId    String
+  key       String
+  label     String
+  type      String @default("text") // text | number | currency | percent | date
+  description String?
+  order     Int
+  isCustom  Boolean @default(false)
+
+  task   ExtractionTask    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  results ExtractionResult[]
+
+  @@unique([taskId, key])
+}
+
+model ExtractionResult {
+  id           String       @id @default(cuid())
+  taskId       String
+  fieldId      String
+  documentId   String?
+  value        String?
+  unit         String?
+  confidence   Float        @default(0)
+  page         Int?
+  sheet        String?
+  cell         String?      // e.g. "B7"
+  excerpt      String?      @db.Text
+  status       ResultStatus  @default(NEEDS_REVIEW)
+  flagged      Boolean      @default(false)
+  note         String?
+  reviewedById String?
+  reviewedAt   DateTime?
+
+  task       ExtractionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  field      ExtractionField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  document   Document?     @relation(fields: [documentId], references: [id])
+
+  @@unique([taskId, fieldId, documentId])
+  @@index([taskId])
+}
+
+// ── Questionnaires ──────────────────────────────────────────────────────
+
+model Questionnaire {
+  id          String   @id @default(cuid())
+  workspaceId String
+  title       String
+  description String?
+  status      String   @default("in_progress") // draft | in_progress | completed
+  source      String   @default("custom")      // custom | imported
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@index([workspaceId, updatedAt])
+}
+
+model Question {
+  id              String  @id @default(cuid())
+  questionnaireId String
+  section         String  @default("General")
+  order           Int
+  type            String  @default("text") // yes_no | multiple_choice | text | table
+  prompt          String  @db.Text
+  options         Json?   // for multiple choice
+  required        Boolean @default(true)
+
+  questionnaire Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  answer       QuestionAnswer?
+
+  @@index([questionnaireId, order])
+}
+
+model QuestionAnswer {
+  id            String        @id @default(cuid())
+  questionId    String        @unique
+  draftAnswer   String?       @db.Text
+  finalAnswer   String?       @db.Text
+  confidence    Float?
+  status        AnswerStatus  @default(MISSING)
+  comment       String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  updatedAt     DateTime      @updatedAt
+
+  question Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  evidence AnswerEvidence[]
+
+  @@index([status])
+}
+
+model AnswerEvidence {
+  id         String @id @default(cuid())
+  answerId   String
+  documentId String?
+  page       Int?
+  kind       CitationKind @default(PARAGRAPH)
+  tableRef   String?
+  excerpt    String @db.Text
+
+  answer   QuestionAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  document Document?      @relation(fields: [documentId], references: [id])
+
+  @@index([answerId])
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────
+
+model Entity {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  createdAt   DateTime @default(now())
+
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  observations MetricObservation[]
+  reports     Report[]
+
+  @@unique([workspaceId, name])
+}
+
+// One metric for one period. Derivation distinguishes reported vs calculated
+// vs AI-inferred; every row can point at its supporting document.
+model MetricObservation {
+  id                String     @id @default(cuid())
+  entityId          String
+  metricKey         String     // e.g. revenue | operating_margin | net_debt
+  label             String
+  period            String     // e.g. "Q3 2026"
+  periodStart       DateTime?
+  value             Float
+  unit              String     @default("USD")
+  derivation        Derivation @default(REPORTED)
+  confidence        Float?
+  sourceDocumentId  String?
+  sourcePage        Int?
+  sourceExcerpt     String?    @db.Text
+  extractionResultId String?
+  createdAt         DateTime   @default(now())
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, metricKey, period])
+  @@index([entityId, metricKey])
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  workspaceId String
+  entityId    String?
+  title       String
+  type        String   @default("quarterly")
+  params      Json     @default("{}")
+  schedule    String?  // cron expression; null = on-demand only
+  lastRunAt   DateTime?
+  content     Json?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entity    Entity?   @relation(fields: [entityId], references: [id])
+
+  @@index([workspaceId])
+}
+
+// ── Notifications, audit, jobs ───────────────────────────────────────────
+
+model Notification {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String?
+  kind       String    // document.completed | invitation.received | ...
+  title      String
+  body       String?
+  link       String?
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id])
+
+  @@index([userId, readAt])
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  actorId     String?
+  action      String   // user.signup, document.upload, document.download, role.change ...
+  targetType  String?
+  targetId   String?
+  meta        Json?
+  ip          String?
+  createdAt  DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id])
+  actor     User?      @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([workspaceId, createdAt])
+  @@index([action])
+}
+
+// Postgres-backed job queue (workers claim rows with SELECT ... FOR UPDATE SKIP LOCKED)
+model Job {
+  id          String    @id @default(cuid())
+  type        String    // PROCESS_DOCUMENT | RUN_EXTRACTION | DRAFT_QUESTIONNAIRE | REFRESH_ANALYTICS
+  payload     Json
+  status      JobStatus @default(QUEUED)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  runAt       DateTime  @default(now())
+  lockedAt    DateTime?
+  lockedBy    String?
+  error       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, runAt])
+}
