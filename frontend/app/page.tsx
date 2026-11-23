@@ -11,7 +11,6 @@ export default function Entry() {
   useEffect(() => {
     if (loading) return;
     if (!user) router.replace('/sign-in');
-    else if (user.onboardingStep < 4) router.replace('/onboarding');
     else router.replace('/dashboard');
   }, [user, loading, router]);
 

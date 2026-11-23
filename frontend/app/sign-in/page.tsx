@@ -21,8 +21,10 @@ export default function SignIn() {
     e.preventDefault();
     setBusy(true); setError(null); setUnverified(false);
     try {
-      const u = await signIn(email, password, keep);
-      router.replace(u.onboardingStep < 4 ? '/onboarding' : '/dashboard');
+      await signIn(email, password, keep);
+      // Straight to the dashboard after login — no onboarding or other steps
+      // in between. The dashboard handles workspace-less users gracefully.
+      router.replace('/dashboard');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Sign-in failed.';
       setError(msg);
