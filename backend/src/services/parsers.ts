@@ -39,9 +39,14 @@ export type ParsedDoc = {
 // "Footnotes"/"Notes" marker. Note: scanned PDFs without a text layer are
 // flagged ocrRequired — they surface as NEEDS_REVIEW rather than silently
 // pretending to be understood.
-function parsePdf(filePath: string): ParsedDoc {
-  const data = pdfParse(filePath);
-  const pages = data.text.split('\f');
+async function parsePdf(filePath: string): Promise<ParsedDoc> {
+  // pdf-parse returns a Promise — it MUST be awaited (previously it wasn't,
+  // so data.text was undefined and every real PDF upload crashed with
+  // "Cannot read properties of undefined (reading 'split')").
+  const data = await pdfParse(filePath);
+  // Scanned/image-only PDFs can yield no text at all — treat as empty rather
+  // than crashing; the ocrRequired flag below then surfaces NEEDS_REVIEW.
+  const pages = (data?.text ?? '').split('\f');
   const sections: ParsedSection[] = [];
   let order = 0;
   let totalChars = 0;
