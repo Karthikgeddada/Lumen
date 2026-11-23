@@ -670,3 +670,14 @@ model Job {
 
   @@index([status, runAt])
 }
+
+// DB-backed document storage — used when S3/R2 STORAGE_* vars are not set
+// (STORAGE_DRIVER=db is the automatic default in that case). Open-source
+// Postgres as the object store; S3/R2 remains the drop-in upgrade.
+model StoredObject {
+  key         String   @id
+  contentType String
+  data        Bytes
+  sizeBytes   Int
+  createdAt   DateTime @default(now())
+}

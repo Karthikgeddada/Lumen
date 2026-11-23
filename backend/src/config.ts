@@ -41,6 +41,9 @@ export const config = {
   },
 
   storage: {
+    // 's3' forces the S3/R2 client; 'db' stores files in Postgres itself;
+    // default: S3 when STORAGE_* vars are set, otherwise db (zero-config).
+    driver: process.env.STORAGE_DRIVER || '',
     endpoint: process.env.STORAGE_ENDPOINT || '',
     region: process.env.STORAGE_REGION || 'us-east-1',
     bucket: process.env.STORAGE_BUCKET || '',

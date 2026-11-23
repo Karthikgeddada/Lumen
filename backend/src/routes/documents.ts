@@ -6,7 +6,7 @@ import { config, hasStorage } from '../config';
 import { ApiError, asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace, assertDocAccess } from '../middleware/auth';
 import { audit, paginate, pageMeta } from '../utils';
-import { putObject, presignedDownloadUrl, storageKey } from '../services/storage';
+import { putObject, presignedDownloadUrl, storageKey, storageMode, dbGetObject, verifyFileToken } from '../services/storage';
 import { enqueue } from '../services/queue';
 import { SUPPORTED_EXTENSIONS, extOf } from '../services/parsers';
 
@@ -25,8 +25,8 @@ router.post(
   requireWorkspace('EDITOR'),
   upload.array('files', 20),
   asyncH(async (req, res) => {
-    if (!hasStorage()) {
-      throw new ApiError(503, 'STORAGE_UNCONFIGURED', 'Object storage is not configured on this deployment. Set the STORAGE_* environment variables.');
+    if (storageMode() === 's3' && !hasStorage()) {
+      throw new ApiError(503, 'STORAGE_UNCONFIGURED', 'S3 storage is selected (STORAGE_DRIVER=s3) but not configured. Set the STORAGE_* environment variables, or remove STORAGE_DRIVER to store files in the database.');
     }
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];
     if (!files.length) throw new ApiError(400, 'NO_FILES', 'No files were uploaded.');
@@ -203,7 +203,7 @@ router.post(
     const { workspaceId } = await assertDocAccess(req, req.params.documentId, 'EDITOR');
     const doc = await prisma.document.findUnique({ where: { id: req.params.documentId } });
     if (doc?.isDemo) throw new ApiError(409, 'DEMO_DOCUMENT', 'Demo documents cannot be reprocessed.');
-    if (!hasStorage()) throw new ApiError(503, 'STORAGE_UNCONFIGURED', 'Object storage is not configured on this deployment.');
+    if (storageMode() === 's3' && !hasStorage()) throw new ApiError(503, 'STORAGE_UNCONFIGURED', 'S3 storage is selected but not configured. Set the STORAGE_* environment variables, or remove STORAGE_DRIVER to store files in the database.');
     await prisma.document.update({
       where: { id: req.params.documentId },
       data: { status: 'QUEUED', error: null, deletedAt: null },
@@ -228,6 +228,27 @@ router.get(
     const url = await presignedDownloadUrl(doc.storageKey, doc.name);
     await audit({ workspaceId, actorId: req.auth!.userId, action: 'document.download', targetType: 'document', targetId: doc.id });
     res.json({ url, expiresInSeconds: 300 });
+  }),
+);
+
+// DB-storage streaming — ?t= is HMAC-signed and time-limited (same trust
+// model as an S3 presigned URL; no session required).
+router.get(
+  '/:documentId/file',
+  asyncH(async (req, res) => {
+    if (!verifyFileToken(req.params.documentId, typeof req.query.t === 'string' ? req.query.t : undefined)) {
+      throw new ApiError(403, 'FILE_LINK_EXPIRED', 'This download link has expired. Request a new one.');
+    }
+    const doc = await prisma.document.findUnique({ where: { id: req.params.documentId } });
+    if (!doc || doc.deletedAt || !doc.storageKey || doc.storageKey === 'pending' || doc.storageKey === 'demo/placeholder') {
+      throw new ApiError(404, 'NOT_FOUND', 'Document file not found.');
+    }
+    const obj = await dbGetObject(doc.storageKey);
+    if (!obj) throw new ApiError(404, 'NOT_FOUND', 'Document file not found.');
+    res.setHeader('Content-Type', obj.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.name.replace(/["\\]/g, '')}"`);
+    res.setHeader('Content-Length', String(obj.data.length));
+    res.send(obj.data);
   }),
 );
 
