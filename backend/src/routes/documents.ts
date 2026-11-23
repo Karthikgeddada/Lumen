@@ -10,7 +10,7 @@ import { putObject, presignedDownloadUrl, storageKey } from '../services/storage
 import { enqueue } from '../services/queue';
 import { SUPPORTED_EXTENSIONS, extOf } from '../services/parsers';
 
-const router = Router();
+const router = Router({ mergeParams: true }); // inherit :workspaceId from the app.use mount — routers do not merge parent params by default
 
 const upload = multer({
   storage: multer.memoryStorage(),

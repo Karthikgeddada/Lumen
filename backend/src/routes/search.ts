@@ -5,7 +5,7 @@ import { asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { excerptOf } from '../utils';
 
-const router = Router();
+const router = Router({ mergeParams: true }); // inherit :workspaceId from the app.use mount — routers do not merge parent params by default
 
 // Global search: document names + passages inside documents, each with its
 // location (page / sheet / heading) so results are traceable.

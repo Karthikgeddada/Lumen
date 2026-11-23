@@ -5,7 +5,7 @@ import { ApiError, asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { audit } from '../utils';
 
-const router = Router();
+const router = Router({ mergeParams: true }); // inherit :workspaceId from the app.use mount — routers do not merge parent params by default
 
 // Collections group documents (e.g. “Earnings 2026”, “Vendor contracts”).
 
