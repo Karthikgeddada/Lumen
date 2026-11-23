@@ -103,10 +103,23 @@ router.post(
       return res.status(201).json({ user: await mePayload(user.id), ...tokens });
     }
 
-    // Existing address: legacy flow — generic response, never leak existence.
-    await sendCodeFor(existing.emailVerifiedAt ? null : body.email, 'EMAIL_VERIFY');
+    // Pre-existing UNVERIFIED address (registered before verification was
+    // removed): treat exactly like a fresh signup — mark verified and sign in.
+    // Verification is gone, so email proof no longer exists to protect; and
+    // re-registering must never brick an address when email delivery fails.
+    if (!existing.emailVerifiedAt) {
+      const user = await prisma.user.update({
+        where: { id: existing.id },
+        data: { emailVerifiedAt: new Date() },
+      });
+      await audit({ actorId: user.id, action: 'user.register', ip: req.ip });
+      const tokens = await issueSession(res, user.id, true, req);
+      return res.status(201).json({ user: await mePayload(user.id), ...tokens });
+    }
 
-    res.status(201).json({ ok: true, message: 'Check your email for a verification code.' });
+    // Already-verified account: never issue a session without the password —
+    // re-registering an email must never take over an existing account.
+    res.status(200).json({ ok: true, message: 'An account with this email already exists. Please sign in.' });
   }),
 );
 

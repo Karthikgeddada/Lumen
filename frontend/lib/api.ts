@@ -106,7 +106,10 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new ApiError(res.status, data?.code ?? 'HTTP_ERROR', data?.message ?? `Request failed (${res.status})`, data?.details);
+    // Backend error shape: { error: { code, message, details } } — also accept
+    // the flat { code, message } shape just in case.
+    const err = data?.error ?? data;
+    throw new ApiError(res.status, err?.code ?? 'HTTP_ERROR', err?.message ?? `Request failed (${res.status})`, err?.details);
   }
   return data as T;
 }
@@ -137,7 +140,7 @@ export async function streamSSE(
     let message = `Request failed (${res.status})`;
     try {
       const data = await res.json();
-      if (data?.message) message = data.message;
+      if (data?.error?.message ?? data?.message) message = data?.error?.message ?? data?.message;
     } catch {}
     throw new ApiError(res.status, 'STREAM_ERROR', message);
   }
