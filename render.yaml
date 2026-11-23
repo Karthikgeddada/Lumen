@@ -8,6 +8,7 @@ services:
   - type: web
     name: lumen-api
     runtime: node
+    rootDir: backend # monorepo — build and start inside backend/ (repo root has no package.json)
     plan: free
     region: singapore # closest free region to India; switch to oregon if unavailable on free
     buildCommand: npm ci --include=dev && npx prisma generate && npm run build
