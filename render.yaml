@@ -1,5 +1,8 @@
 # Render blueprint — free tier: one web service hosting the API and the background worker together.
 # PostgreSQL is external (Neon); set DATABASE_URL + DIRECT_URL as secrets in the dashboard.
+# Only the 5 required vars are listed — FRONTEND_URL / ALLOWED_ORIGINS (after the Vercel
+# deploy), SMTP_* / MAIL_FROM (email) and STORAGE_* (uploads) are added later in the
+# service's Environment tab; the app degrades gracefully without them.
 # Docs: https://render.com/docs/blueprint-spec
 # Free tier: sleeps after ~15 min idle (cold start ~50s); background jobs pause while asleep.
 # The paid two-service blueprint (separate Background Worker) is preserved in git history.
@@ -24,22 +27,9 @@ services:
         sync: false # Neon DIRECT connection string (same host WITHOUT -pooler) — used by prisma migrate deploy
       - key: AUTH_SECRET
         generateValue: true
-      - key: FRONTEND_URL
-        sync: false # set to your Vercel URL, e.g. https://lumen.vercel.app
-      - key: ALLOWED_ORIGINS
-        sync: false # comma-separated: https://lumen.vercel.app,https://lumen-git-main-xxx.vercel.app
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        value: 587
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: MAIL_FROM
-        sync: false
-      - key: MAIL_DEV_MODE
-        value: "false"
+      # FRONTEND_URL / ALLOWED_ORIGINS: add in the Environment tab after the Vercel deploy (CORS + links)
+      # SMTP_* / MAIL_FROM: add when you want real emails — until then, verification codes are logged
+      # STORAGE_*: add before real uploads (Cloudflare R2 / S3) — seeded demo data needs none
       - key: AI_PROVIDER_API_KEY
         sync: false
       - key: AI_BASE_URL
@@ -50,15 +40,5 @@ services:
         value: local # run an open-source embedding model in-process — no API/key needed (OpenRouter has no embeddings endpoint)
       - key: AI_EMBEDDING_MODEL
         value: Xenova/all-MiniLM-L6-v2 # open-source, 384-dim, ONNX; downloaded on first use (~25 MB)
-      - key: STORAGE_ENDPOINT
-        sync: false
-      - key: STORAGE_REGION
-        sync: false
-      - key: STORAGE_BUCKET
-        sync: false
-      - key: STORAGE_ACCESS_KEY
-        sync: false
-      - key: STORAGE_SECRET_KEY
-        sync: false
       - key: MAX_UPLOAD_MB
         value: "500"
