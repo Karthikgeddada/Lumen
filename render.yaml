@@ -42,3 +42,28 @@ services:
         value: Xenova/all-MiniLM-L6-v2 # open-source, 384-dim, ONNX; downloaded on first use (~25 MB)
       - key: MAX_UPLOAD_MB
         value: "500"
+      # Python pipelines sidecar (python-pipelines/): set after its first deploy.
+      # Unset = Node uses its built-in JS parsers (current behavior).
+      - key: PARSE_SERVICE_URL
+        sync: false
+      - key: PIPELINES_TOKEN
+        sync: false
+
+  # Module 1: Document Parsing Engine (pdfplumber / python-docx / openpyxl / pandas).
+  # Free tier sleeps ~15 min idle (~50 s cold start); the API falls back to its
+  # JS parsers when this is unreachable, so it is safe to leave unconfigured.
+  - type: web
+    name: lumen-pipelines
+    runtime: python
+    rootDir: python-pipelines
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PIPELINES_TOKEN
+        generateValue: true
+      - key: MAX_UPLOAD_MB
+        value: "100"
