@@ -52,7 +52,19 @@ async function tick(): Promise<boolean> {
 
 async function main() {
   logger.info({ workerId: WORKER_ID, env: config.env }, 'lumen-worker started');
-  await requeueStaleJobs();
+  // Startup stale-job requeue: retry until the database answers. A Neon cold
+  // start or brief outage at boot must not crash the process (previously an
+  // unhandled rejection here crash-looped the whole service).
+  for (;;) {
+    try {
+      await requeueStaleJobs();
+      break;
+    } catch (err) {
+      if (!running) return;
+      logger.error({ err: String(err) }, 'startup requeue failed — retrying in 5s');
+      await sleep(5000);
+    }
+  }
   let lastStaleCheck = Date.now();
   let lastReportCheck = Date.now();
 
