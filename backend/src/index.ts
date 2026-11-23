@@ -39,6 +39,18 @@ app.use(
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 
+// ── Root: friendly landing for humans hitting the API URL ─────────
+app.get('/', (_req, res) => {
+  res.json({
+    service: 'lumen-api',
+    status: 'ok',
+    env: config.env,
+    ui: config.frontendUrl,
+    hint: 'API only — this URL serves no pages. Open the "ui" link for the app.',
+    health: '/api/health',
+  });
+});
+
 // ── Health check (Render + uptime monitors) ────────────────────────
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'lumen-api', env: config.env, uptime: process.uptime() });
