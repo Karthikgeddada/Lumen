@@ -43,10 +43,18 @@ function RegisterInner() {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      await api('/api/auth/register', {
+      const data = await api<{ user?: unknown; accessToken?: string; refreshToken?: string }>('/api/auth/register', {
         method: 'POST',
         body: { ...form, acceptTerms: true },
       });
+      // New flow: the backend creates verified accounts and returns a session
+      // immediately — go straight into the app, no email needed. Fall back to
+      // the code flow for accounts that predate this change.
+      if (data.accessToken && data.refreshToken) {
+        storeTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+        router.replace('/onboarding');
+        return;
+      }
       setStep('verify');
       setInfo(`We sent a 6-digit code to ${form.email}. It expires in 15 minutes.`);
     } catch (err) {

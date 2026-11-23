@@ -82,19 +82,29 @@ router.post(
 
     const existing = await prisma.user.findUnique({ where: { email: body.email } });
 
-    // Generic response either way — never leak whether an email is registered.
     if (!existing) {
-      await prisma.user.create({
+      // Email verification is disabled: new accounts are created verified so
+      // anyone can register with an email + password and sign in right away.
+      // (Password reset still uses emailed codes — see /forgot and /reset.)
+      // Pre-existing unverified accounts keep the code flow: re-registering
+      // someone's email must never hand out their account.
+      const user = await prisma.user.create({
         data: {
           firstName: body.firstName,
           lastName: body.lastName,
           email: body.email,
           passwordHash: await bcrypt.hash(body.password, 12),
+          emailVerifiedAt: new Date(),
           onboardingStep: 1,
         },
       });
+      await audit({ actorId: user.id, action: 'user.register', ip: req.ip });
+      const tokens = await issueSession(res, user.id, true, req);
+      return res.status(201).json({ user: await mePayload(user.id), ...tokens });
     }
-    await sendCodeFor(existing?.emailVerifiedAt ? null : body.email, 'EMAIL_VERIFY');
+
+    // Existing address: legacy flow — generic response, never leak existence.
+    await sendCodeFor(existing.emailVerifiedAt ? null : body.email, 'EMAIL_VERIFY');
 
     res.status(201).json({ ok: true, message: 'Check your email for a verification code.' });
   }),
