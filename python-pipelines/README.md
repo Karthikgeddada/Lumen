@@ -20,8 +20,9 @@ cloud accounts, no API keys, no paid services.
 cd python-pipelines
 pip install -r requirements.txt
 uvicorn main:app --port 8100
-# smoke test:
-curl -F file=@some.pdf localhost:8100/parse
+# smoke test (raw body — no multipart dependency at all):
+curl --data-binary @some.pdf -H "Content-Type: application/octet-stream" \
+     "localhost:8100/parse?name=some.pdf"
 ```
 
 ## Deploy (Render)
@@ -41,9 +42,11 @@ because of Python.
 
 ## Contract
 
-`POST /parse` (multipart `file`) returns the exact JSON shape the Node
-pipeline consumes (`pageCount`, `ocrRequired`, `sections[]`, `tables[]`),
-so integrating it is a drop-in swap inside `parseDocument()`.
+`POST /parse?name=<filename>` with the file as the **raw request body**
+(`application/octet-stream` — no multipart library needed) returns the
+exact JSON shape the Node pipeline consumes (`pageCount`, `ocrRequired`,
+`sections[]`, `tables[]`), so integrating it is a drop-in swap inside
+`parseDocument()`.
 
 Caveat (verified): formula cells keep their provenance (`ref` + `f`), and
 the computed value `v` comes from the cache the *saving application*

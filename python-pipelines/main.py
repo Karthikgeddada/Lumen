@@ -14,7 +14,7 @@ Response contract mirrors the Node ParsedDoc shape exactly:
 }
 
 Run locally:  uvicorn main:app --port 8100
-Call:         curl -F file=@doc.pdf -H "X-Pipeline-Token: $PIPELINES_TOKEN" localhost:8100/parse
+Call:         curl --data-binary @doc.pdf -H "Content-Type: application/octet-stream" \n              -H "X-Pipeline-Token: $PIPELINES_TOKEN" "localhost:8100/parse?name=doc.pdf"
 """
 
 import io
@@ -22,7 +22,7 @@ import os
 import statistics
 from typing import Any
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "100"))
 TOKEN = os.environ.get("PIPELINES_TOKEN", "")
@@ -230,11 +230,17 @@ def parse_csv(data: bytes, base_name: str) -> dict[str, Any]:
 
 # ── Dispatch ───────────────────────────────────────────────────────────
 @app.post("/parse")
-async def parse(file: UploadFile = File(...), x_pipeline_token: str | None = Header(default=None)) -> dict[str, Any]:
+async def parse(
+    request: Request,
+    name: str = Query(..., description="Original file name, e.g. report.pdf"),
+    x_pipeline_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Raw-body upload (application/octet-stream) — deliberately no multipart
+    so no python-multipart dependency is needed."""
     _check_token(x_pipeline_token)
-    data = await file.read()
+    data = await request.body()
     _check_size(data)
-    name = file.filename or "document"
+
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     base_name = name.rsplit(".", 1)[0]
 
