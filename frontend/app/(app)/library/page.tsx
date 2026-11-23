@@ -121,12 +121,27 @@ export default function Library() {
                   <td style={{ fontSize: 12.5 }}>{formatBytes(doc.sizeBytes)}</td>
                   <td><DocStatusBadge status={doc.status} /></td>
                   <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{timeAgo(doc.uploadedAt)}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {doc.status === 'FAILED' && can('EDITOR') && !doc.isDemo ? (
-                      <button className="btn btn-ghost btn-sm" title="Retry processing"
-                        onClick={async () => { await api(`/api/workspaces/${wid}/documents/${doc.id}/retry`, { method: 'POST' }); mutate(); }}>
-                        <RotateCcw size={13} /> Retry
-                      </button>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <Link className="btn btn-ghost btn-sm" href={`/documents/${doc.id}`} title="Open document details">
+                      Details
+                    </Link>
+                    {can('EDITOR') && !doc.isDemo ? (
+                      <>
+                        {doc.status === 'FAILED' ? (
+                          <button className="btn btn-ghost btn-sm" title="Retry processing"
+                            onClick={async () => { await api(`/api/workspaces/${wid}/documents/${doc.id}/retry`, { method: 'POST' }); mutate(); }}>
+                            <RotateCcw size={13} /> Retry
+                          </button>
+                        ) : null}
+                        <button className="btn btn-ghost btn-sm" title="Delete document" style={{ color: '#c0392b' }}
+                          onClick={async () => {
+                            if (!window.confirm(`Delete "${doc.name}"? This removes the file, its analysis, and chat history for this document. This cannot be undone.`)) return;
+                            await api(`/api/workspaces/${wid}/documents/${doc.id}`, { method: 'DELETE' });
+                            mutate();
+                          }}>
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      </>
                     ) : null}
                   </td>
                 </tr>
