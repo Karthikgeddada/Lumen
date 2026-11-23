@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
-import { FileSpreadsheet, Plus, Upload, ArrowRight } from 'lucide-react';
+import { FileSpreadsheet, Plus, Upload, ArrowRight, Trash2 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
 import { EmptyState, Field, LoadingBlock, Modal, formatDate, timeAgo } from '../../../components/ui';
@@ -99,8 +99,18 @@ export default function Questionnaires() {
                     </td>
                     <td><span className={`badge ${STATUS[q.status]?.cls ?? 'badge-neutral'}`}>{STATUS[q.status]?.label ?? q.status}</span></td>
                     <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{timeAgo(q.updatedAt)}</td>
-                    <td style={{ textAlign: 'right' }}>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <Link href={`/questionnaires/${q.id}`} className="btn btn-ghost btn-sm">Open <ArrowRight size={13} /></Link>
+                      {can('EDITOR') ? (
+                        <button className="btn btn-ghost btn-sm" title="Delete questionnaire" style={{ color: '#c0392b' }}
+                          onClick={async () => {
+                            if (!window.confirm(`Delete questionnaire "${q.title}"? Its questions and answers are removed. This cannot be undone.`)) return;
+                            await api(`/api/questionnaires/${q.id}`, { method: 'DELETE' });
+                            mutate();
+                          }}>
+                          <Trash2 size={13} /> Delete
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 );

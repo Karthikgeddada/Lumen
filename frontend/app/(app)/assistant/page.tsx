@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
-import { Plus, MessagesSquare, Sparkles, Library, AlertTriangle } from 'lucide-react';
+import { Plus, MessagesSquare, Sparkles, Library, AlertTriangle, Trash2 } from 'lucide-react';
 import { api, streamSSE } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
 import { EmptyState, ErrorBanner, Modal, Spinner } from '../../../components/ui';
@@ -44,7 +44,7 @@ export default function Assistant() {
   const [evidenceCite, setEvidenceCite] = useState<Citation | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { data: convData } = useSWR(
+  const { data: convData, mutate: refetchConvs } = useSWR(
     wid ? `/api/${wid}/conversations` : null,
     () => api<{ conversations: Conversation[] }>(`/api/workspaces/${wid}/conversations`),
     { refreshInterval: 30000 },
@@ -142,16 +142,31 @@ export default function Assistant() {
             </div>
           ) : (
             convData!.conversations.map((c) => (
-              <button key={c.id} className="nav-item" style={{
-                width: '100%', border: 'none', background: c.id === conversationId ? 'var(--surface)' : 'transparent',
-                cursor: 'pointer', boxShadow: c.id === conversationId ? 'var(--shadow-1)' : 'none',
-                alignItems: 'flex-start',
-              }} onClick={() => { setConversationId(c.id); router.replace(`/assistant?c=${c.id}`); }}>
-                <MessagesSquare size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-                <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {c.title}
-                </span>
-              </button>
+              <div key={c.id} style={{
+                display: 'flex', alignItems: 'center', borderRadius: 8, padding: '2px 2px 2px 6px',
+                background: c.id === conversationId ? 'var(--surface)' : 'transparent',
+                boxShadow: c.id === conversationId ? 'var(--shadow-1)' : 'none',
+              }}>
+                <button className="nav-item" style={{
+                  flex: 1, border: 'none', background: 'transparent', cursor: 'pointer', minWidth: 0,
+                }} onClick={() => { setConversationId(c.id); router.replace(`/assistant?c=${c.id}`); }}>
+                  <MessagesSquare size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.title}
+                  </span>
+                </button>
+                <button title="Delete conversation" aria-label="Delete conversation"
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#c0392b', padding: 4, flexShrink: 0 }}
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm(`Delete conversation "${c.title}"? Its messages are removed. This cannot be undone.`)) return;
+                    await api(`/api/conversations/${c.id}`, { method: 'DELETE' });
+                    if (conversationId === c.id) { setConversationId(null); router.replace('/assistant'); }
+                    refetchConvs();
+                  }}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
             ))
           )}
         </div>

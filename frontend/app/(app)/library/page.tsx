@@ -86,6 +86,39 @@ export default function Library() {
         </select>
       </div>
 
+      {/* Collections — tap name to filter, trash to delete (documents survive) */}
+      {(collData?.collections?.length ?? 0) > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+          {collData!.collections.map((c) => (
+            <span key={c.id} className="badge badge-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px' }}>
+              <button
+                onClick={() => setCollection(c.id)}
+                title={`Show only "${c.name}"`}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', padding: 0, font: 'inherit' }}
+              >
+                {c.name} · {c._count.documents}
+              </button>
+              {can('EDITOR') ? (
+                <button
+                  title={`Delete collection "${c.name}"`}
+                  aria-label={`Delete collection ${c.name}`}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#c0392b', padding: 0, display: 'inline-flex' }}
+                  onClick={async () => {
+                    if (!window.confirm(`Delete collection "${c.name}"? Its documents are kept — they just lose this grouping. This cannot be undone.`)) return;
+                    await api(`/api/workspaces/${wid}/collections/${c.id}`, { method: 'DELETE' });
+                    if (collection === c.id) setCollection('');
+                    refetchColls();
+                    mutate();
+                  }}
+                >
+                  <Trash2 size={12} />
+                </button>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       {/* Table */}
       <div className="card">
         {isLoading && !data ? (
