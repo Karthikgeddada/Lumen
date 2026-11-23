@@ -2,7 +2,11 @@
 // (sameSite=none, sent automatically with credentials:'include') with the
 // localStorage copy as fallback for browsers that block third-party cookies.
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+// Same-origin mode: NEXT_PUBLIC_API_URL=same-origin makes all API calls relative
+// ("/api/...") — the server hosting the frontend proxies them to the backend via
+// the next.config.mjs rewrites. Used by the Databricks App single-container deploy.
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL === 'same-origin' ? '' : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
