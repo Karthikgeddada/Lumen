@@ -11,7 +11,7 @@ The stack: the Next.js app deploys on **Vercel**; the backend (API + background 
 
 ## 2. Backend — Render (free web service)
 
-> Deploy as a **manual Web Service** (New + → Web Service), not via the Blueprint button — the free tier requires no card. `render.yaml` in the repo root documents the same settings if you ever prefer Blueprint sync.
+> Two ways in, both cardless now that `render.yaml` is all-free plans: **Blueprint** (New + → Blueprint → select the repo — Render reads `render.yaml`, creates `lumen-api`, and prompts for the `sync: false` secrets in the dashboard) or a **manual Web Service** (New + → Web Service, same settings by hand). A card is only ever required when a blueprint includes paid plans.
 
 1. On render.com, sign up with **GitHub**, then **New + → Web Service** → connect `Karthikgeddada/Lumen`.
 2. Settings:
