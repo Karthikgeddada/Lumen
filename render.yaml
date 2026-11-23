@@ -45,8 +45,10 @@ services:
         sync: false
       - key: AI_CHAT_MODEL
         sync: false
+      - key: AI_EMBEDDING_BASE_URL
+        value: local # run an open-source embedding model in-process — no API/key needed (OpenRouter has no embeddings endpoint)
       - key: AI_EMBEDDING_MODEL
-        sync: false
+        value: Xenova/all-MiniLM-L6-v2 # open-source, 384-dim, ONNX; downloaded on first use (~25 MB)
       - key: STORAGE_ENDPOINT
         sync: false
       - key: STORAGE_REGION

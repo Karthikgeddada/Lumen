@@ -28,7 +28,8 @@ The stack: the Next.js app deploys on **Vercel**; the backend (API + background 
    * `FRONTEND_URL` — the Vercel URL (fill in after §3; Render redeploys automatically on save)
    * `ALLOWED_ORIGINS` — the Vercel URL, plus `https://<project>-git-main-*.vercel.app` preview patterns if wanted
    * `SMTP_*` + `MAIL_FROM` — transactional email (optional for a first test)
-   * `AI_PROVIDER_API_KEY`, `AI_BASE_URL`, `AI_CHAT_MODEL`, `AI_EMBEDDING_MODEL`
+   * `AI_PROVIDER_API_KEY`, `AI_BASE_URL`, `AI_CHAT_MODEL` — chat provider (e.g. OpenRouter: `https://openrouter.ai/api/v1`)
+   * `AI_EMBEDDING_BASE_URL=local` + `AI_EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2` — open-source embeddings **running in-process**, free, no API needed (OpenRouter has no embeddings endpoint; the model downloads on first use, ~25 MB, and semantic retrieval just works)
    * `STORAGE_*` — only needed before real uploads (§4)
 4. **Create Web Service**. The build runs, migrations apply automatically in the start command (the Neon baseline is already in the repo), and `scripts/start-all.js` starts the API **and** the background worker as one process tree.
 5. Verify `https://lumen-api.onrender.com/api/health` returns `{ ok: true }`.

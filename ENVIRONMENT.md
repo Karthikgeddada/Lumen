@@ -19,7 +19,8 @@ Copy the `.env.example` in each package to `.env` (backend) / `.env.local` (fron
 | `AI_PROVIDER_API_KEY` | recommended | Key for any OpenAI-compatible provider. When empty, retrieval falls back to keyword search and AI features degrade gracefully. |
 | `AI_BASE_URL` | recommended | Defaults to `https://api.openai.com/v1`; change for Azure gateways, OpenRouter, Together… |
 | `AI_CHAT_MODEL` | recommended | e.g. `gpt-4o-mini`. Used for summaries, assistant answers, extraction, questionnaires. |
-| `AI_EMBEDDING_MODEL` | recommended | e.g. `text-embedding-3-small`. Used to embed chunks for semantic retrieval. |
+| `AI_EMBEDDING_BASE_URL` | optional | Defaults to the same `AI_BASE_URL`. Set to `local` to run the embedding model **in-process** via transformers.js — no API or key needed (e.g. with OpenRouter, which has no embeddings endpoint). |
+| `AI_EMBEDDING_MODEL` | recommended | API model (e.g. `text-embedding-3-small`), or with `AI_EMBEDDING_BASE_URL=local`, an open-source model id like `Xenova/all-MiniLM-L6-v2` (384-dim, ONNX). Used to embed chunks for semantic retrieval. |
 | `STORAGE_ENDPOINT` | yes (prod) | S3-compatible endpoint (AWS S3, Cloudflare R2, Backblaze B2, MinIO…). Render disks are ephemeral, so uploads must live in object storage. |
 | `STORAGE_REGION` / `STORAGE_BUCKET` | yes (prod) | Bucket region and name for document storage. |
 | `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | yes (prod) | Bucket credentials with put/get/delete on the bucket. |

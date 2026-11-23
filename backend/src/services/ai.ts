@@ -74,11 +74,42 @@ export async function* chatStream(messages: ChatMessage[]): AsyncGenerator<strin
   }
 }
 
+// Local open-source embeddings (AI_EMBEDDING_BASE_URL=local): the model runs
+// in-process via transformers.js — no API, no key, no cost.
+// e.g. Xenova/all-MiniLM-L6-v2 (384-dim, ONNX quantized).
+let localEmbedder: Promise<(texts: string[]) => Promise<number[][]>> | null = null;
+function getLocalEmbedder(model: string) {
+  localEmbedder ??= (async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    const extractor = (await pipeline('feature-extraction', model)) as unknown as (
+      texts: string[],
+      opts: { pooling: 'mean'; normalize: boolean },
+    ) => Promise<{ tolist(): number[][] }>;
+    return async (texts: string[]) =>
+      (await extractor(texts, { pooling: 'mean', normalize: true })).tolist();
+  })();
+  return localEmbedder;
+}
+
 export async function embed(texts: string[]): Promise<number[][]> {
-  const res = await post('/embeddings', {
-    model: config.ai.embeddingModel,
-    input: texts.map((t) => t.slice(0, 8000)),
+  const input = texts.map((t) => t.slice(0, 8000));
+  if (config.ai.embeddingBaseUrl === 'local') {
+    const run = await getLocalEmbedder(config.ai.embeddingModel);
+    return run(input);
+  }
+  const base = config.ai.embeddingBaseUrl || config.ai.baseUrl;
+  const res = await fetch(`${base}/embeddings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.ai.apiKey}`,
+    },
+    body: JSON.stringify({ model: config.ai.embeddingModel, input }),
   });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`AI provider error ${res.status}: ${detail.slice(0, 300)}`);
+  }
   const data = (await res.json()) as { data: { embedding: number[] }[] };
   return data.data.map((d) => d.embedding);
 }

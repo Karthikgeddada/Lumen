@@ -35,6 +35,8 @@ export const config = {
     apiKey: process.env.AI_PROVIDER_API_KEY || '',
     baseUrl: process.env.AI_BASE_URL || 'https://api.openai.com/v1',
     chatModel: process.env.AI_CHAT_MODEL || 'gpt-4o-mini',
+    // 'local' = run an open-source embedding model in-process (transformers.js)
+    embeddingBaseUrl: process.env.AI_EMBEDDING_BASE_URL || '',
     embeddingModel: process.env.AI_EMBEDDING_MODEL || 'text-embedding-3-small',
   },
 
