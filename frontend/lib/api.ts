@@ -90,8 +90,16 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
 
   let res = await call();
 
-  // One silent refresh-and-retry per request on 401.
-  if (res.status === 401 && !path.startsWith('/api/auth/')) {
+  // One silent refresh-and-retry per request on 401. /api/auth/me is
+  // deliberately INCLUDED: on a hard page reload the in-memory access token
+  // is gone, so the boot-time /me call is exactly what must trigger the
+  // silent refresh — excluding it made every page reload bounce the user
+  // back to sign-in. Only the credential-bearing endpoints themselves
+  // (signin/refresh/register/signout) are exempt, to avoid rotation loops.
+  const refreshExempt =
+    path.startsWith('/api/auth/') &&
+    path !== '/api/auth/me';
+  if (res.status === 401 && !refreshExempt) {
     const ok = await tryRefresh();
     if (ok) res = await call();
   }
