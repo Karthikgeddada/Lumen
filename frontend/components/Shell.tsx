@@ -7,7 +7,7 @@ import useSWR from 'swr';
 import {
   LayoutGrid, Library, MessagesSquare, ClipboardCheck, FileSpreadsheet,
   LineChart, Users, Settings, Search, Bell, ChevronsUpDown, Plus, LogOut,
-  Check, FileText,
+  Check, FileText, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
@@ -43,6 +43,19 @@ export function Shell({ children }: { children: ReactNode }) {
   const [notifMenu, setNotifMenu] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Sidebar collapse — remembered across reloads. Read after mount so the
+  // server-rendered HTML matches the first client paint.
+  useEffect(() => {
+    if (localStorage.getItem('lumen:sidebar') === 'closed') setSidebarOpen(false);
+  }, []);
+  const toggleSidebar = () => {
+    setSidebarOpen((v) => {
+      localStorage.setItem('lumen:sidebar', v ? 'closed' : 'open');
+      return !v;
+    });
+  };
 
   const wsRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
@@ -91,7 +104,7 @@ export function Shell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="shell">
+    <div className={`shell ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="mark">L</span> Lumen
@@ -157,6 +170,15 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <div className="main">
         <header className="topbar">
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ padding: '0 7px' }}
+            onClick={toggleSidebar}
+            aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+            title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          >
+            {sidebarOpen ? <PanelLeftClose size={16} strokeWidth={1.9} /> : <PanelLeftOpen size={16} strokeWidth={1.9} />}
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => setSearchOpen(true)} style={{ gap: 8, color: 'var(--text-muted)', width: 220, justifyContent: 'flex-start' }}>
             <Search size={14} /> Search documents…
             <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, opacity: 0.7 }}>⌘K</span>

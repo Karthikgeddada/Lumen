@@ -186,6 +186,8 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 
 /* ── App shell ──────────────────────────────────────────────────── */
 .shell { display: flex; min-height: 100vh; background: var(--bg); }
+/* Collapsed via the topbar toggle — main content takes the full width. */
+.shell.sidebar-collapsed .sidebar { display: none; }
 
 .sidebar {
   width: var(--sidebar-w); flex-shrink: 0;
