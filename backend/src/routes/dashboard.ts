@@ -26,6 +26,9 @@ router.get(
       activeProcessing,
       recentActivity,
       recentConversations,
+      covenantDefinitions,
+      entitiesCount,
+      observationsCount,
     ] = await Promise.all([
       prisma.document.count({ where: { workspaceId: wid, deletedAt: null } }),
       prisma.document.aggregate({
@@ -82,7 +85,46 @@ router.get(
         take: 5,
         select: { id: true, title: true, updatedAt: true, documentIds: true },
       }),
+      prisma.covenantDefinition.findMany({
+        where: { workspaceId: wid, deletedAt: null },
+        include: { entity: { select: { name: true } } },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.entity.count({ where: { workspaceId: wid } }),
+      prisma.metricObservation.count({ where: { entity: { workspaceId: wid } } }),
     ]);
+
+    // Latest test result per covenant, breaches first for the status board.
+    const defIds = covenantDefinitions.map((d) => d.id);
+    const recentResults = defIds.length
+      ? await prisma.covenantResult.findMany({
+          where: { definitionId: { in: defIds } },
+          orderBy: { computedAt: 'desc' },
+        })
+      : [];
+    const latestByDef = new Map<string, (typeof recentResults)[number]>();
+    for (const r of recentResults) {
+      if (!latestByDef.has(r.definitionId)) latestByDef.set(r.definitionId, r);
+    }
+    const covenantBoard = covenantDefinitions
+      .map((d) => ({
+        id: d.id,
+        label: d.label,
+        entityName: d.entity.name,
+        comparator: d.comparator,
+        threshold: d.threshold,
+        unit: d.unit,
+        needsReview: d.status === 'AI_INFERRED',
+        latest: latestByDef.get(d.id) ?? null,
+      }))
+      .sort((a, b) => {
+        const rank = (x: { latest: { status: string } | null; needsReview: boolean }) =>
+          x.latest?.status === 'FAIL' ? 0 : !x.latest ? 1 : x.needsReview ? 2 : 3;
+        return rank(a) - rank(b);
+      });
+
+    const latestPeriods = new Set(recentResults.map((r) => r.period));
+    const breaches = covenantBoard.filter((c) => c.latest?.status === 'FAIL').length;
 
     res.json({
       kpis: {
@@ -90,7 +132,12 @@ router.get(
         pagesUnderstood: pagesUnderstood._sum.pageCount ?? 0,
         extractions: extractionsCount,
         openReviews: openExtractionReviews + openAnswerReviews,
+        covenants: covenantDefinitions.length,
+        breaches,
+        covenantPeriods: Array.from(latestPeriods),
       },
+      covenants: covenantBoard,
+      portfolio: { entities: entitiesCount, observations: observationsCount },
       recentDocuments,
       activeProcessing,
       recentActivity,

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import useSWR from 'swr';
 import {
   FileText, MessagesSquare, ClipboardCheck, Upload, ArrowRight,
-  FileSpreadsheet, Users, Trash2, CheckCircle2, Sparkles,
+  FileSpreadsheet, Users, Trash2, CheckCircle2, Sparkles, Scale, ShieldAlert, ShieldCheck, Building2,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
@@ -13,8 +13,18 @@ import {
   formatDate, timeAgo, formatBytes,
 } from '../../../components/ui';
 
+interface CovenantBoardItem {
+  id: string; label: string; entityName: string;
+  comparator: 'LTE' | 'GTE'; threshold: number; unit: string; needsReview: boolean;
+  latest: { period: string; status: 'PASS' | 'FAIL' | 'NOT_TESTED' | 'WAIVED'; value: number | null; headroom: number | null } | null;
+}
 interface DashboardData {
-  kpis: { documents: number; pagesUnderstood: number; extractions: number; openReviews: number };
+  kpis: {
+    documents: number; pagesUnderstood: number; extractions: number; openReviews: number;
+    covenants: number; breaches: number; covenantPeriods: string[];
+  };
+  covenants: CovenantBoardItem[];
+  portfolio: { entities: number; observations: number };
   recentDocuments: {
     id: string; name: string; fileType: string; status: string; pageCount: number | null;
     uploadedAt: string; isDemo: boolean;
@@ -89,14 +99,65 @@ export default function Dashboard() {
         <>
           {/* KPIs */}
           <div className="grid-kpi" style={{ marginBottom: 16 }}>
-            <Kpi label="Documents" value={d.kpis.documents.toLocaleString()} icon={<FileText size={16} />} />
+            <Kpi label="Covenants tracked" value={d.kpis.covenants.toLocaleString()} icon={<Scale size={16} />}
+              accent={d.kpis.breaches > 0 ? 'var(--error)' : undefined} />
+            <Kpi label="Breached (latest tests)" value={d.kpis.breaches.toLocaleString()} icon={<ShieldAlert size={16} />}
+              accent={d.kpis.breaches > 0 ? 'var(--error)' : 'var(--success, #1d9a4b)'} />
+            <Kpi label="Open reviews" value={d.kpis.openReviews.toLocaleString()} icon={<ClipboardCheck size={16} />} />
             <Kpi label="Pages understood" value={d.kpis.pagesUnderstood.toLocaleString()} icon={<FileText size={16} />} />
-            <Kpi label="Extractions" value={d.kpis.extractions.toLocaleString()} icon={<ClipboardCheck size={16} />} />
-            <Kpi label="Open reviews" value={d.kpis.openReviews.toLocaleString()} icon={<FileSpreadsheet size={16} />} />
           </div>
 
           <div className="grid-2" style={{ gridTemplateColumns: '1.55fr 1fr' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Covenant status board */}
+              {d.covenants.length > 0 ? (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Covenant status</div>
+                    <Link href="/covenants" className="btn btn-ghost btn-sm">All covenants <ArrowRight size={13} /></Link>
+                  </div>
+                  {d.covenants.slice(0, 6).map((c) => (
+                    <Link key={c.id} href="/covenants" style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '11px 20px',
+                      borderBottom: '1px solid var(--border)', textDecoration: 'none', color: 'inherit',
+                    }}>
+                      {c.latest?.status === 'FAIL'
+                        ? <ShieldAlert size={15} color="var(--error)" style={{ flexShrink: 0 }} />
+                        : c.latest?.status === 'PASS'
+                          ? <ShieldCheck size={15} color="var(--success, #1d9a4b)" style={{ flexShrink: 0 }} />
+                          : <Scale size={15} color="var(--text-muted)" style={{ flexShrink: 0 }} />}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 560, display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                          {c.label}
+                          {c.needsReview ? <span className="badge badge-blue">review</span> : null}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                          <Building2 size={10} /> {c.entityName}
+                        </div>
+                      </div>
+                      {c.latest ? (
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <div className="mono" style={{ fontSize: 13, fontWeight: 640, color: c.latest.status === 'FAIL' ? 'var(--error)' : 'inherit' }}>
+                            {c.latest.value ?? '—'} vs {c.comparator === 'LTE' ? '≤' : '≥'}{c.threshold}{c.unit}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            {c.latest.period}{c.latest.headroom != null
+                              ? ` · ${c.latest.headroom >= 0 ? '+' : ''}${Math.abs(c.latest.headroom) < 10 ? c.latest.headroom.toFixed(2) : `${(c.latest.headroom / 1_000_000).toFixed(1)}M`}${c.unit} headroom`
+                              : ''}
+                          </div>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }}>not tested</span>
+                      )}
+                    </Link>
+                  ))}
+                  {d.portfolio.entities > 0 ? (
+                    <div style={{ padding: '9px 20px', fontSize: 11.5, color: 'var(--text-muted)', background: 'var(--sunken)' }}>
+                      {d.portfolio.entities} portfolio {d.portfolio.entities === 1 ? 'company' : 'companies'} · {d.portfolio.observations} quarterly metrics tracked
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {/* Processing now */}
               {d.activeProcessing.length > 0 ? (
                 <div className="card">
@@ -219,13 +280,13 @@ export default function Dashboard() {
   );
 }
 
-function Kpi({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+function Kpi({ label, value, icon, accent }: { label: string; value: string; icon: React.ReactNode; accent?: string }) {
   return (
     <div className="card card-pad">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ color: 'var(--text-muted)' }}>{icon}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: accent }}>
+        <span style={{ color: accent ?? 'var(--text-muted)' }}>{icon}</span>
       </div>
-      <div className="kpi-value" style={{ marginTop: 10 }}>{value}</div>
+      <div className="kpi-value" style={{ marginTop: 10, color: accent }}>{value}</div>
       <div className="kpi-label">{label}</div>
     </div>
   );
