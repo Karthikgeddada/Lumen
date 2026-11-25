@@ -29,7 +29,8 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 **What it is:** the document library — upload, organize, and read documents with Lumen's understanding attached.
 
 **What it can do today:**
-- Upload PDF, DOC, DOCX, XLSX, CSV (or drag-drop); organize into collections
+- Upload PDF, DOC, DOCX, XLSX, CSV (or drag-drop; up to 20 files at once); organize into collections
+- **Nested folders** — folders inside folders ("Credit Agreements / 2026"), create-inside, move documents between folders per row, cycle-safe reorganization; deleting a folder destroys nothing (documents and subfolders move to the top level)
 - Processing status per document (queued → reading → done / needs review / failed)
 - Document detail view: section outline, extracted tables (with rows), AI summary with **key facts** and **key figures** (each grounded with unit + page reference)
 - Download the original file via an expiring signed link
@@ -37,9 +38,9 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **Internally (the ingestion pipeline):** file bytes stored safely (database or S3-compatible storage) → background worker parses per format (pdf-parse for PDFs, mammoth for Word, SheetJS for Excel) → chunks with heading/page/sheet labels → embedded locally (open-source MiniLM model, runs on our server, no data leaves) → AI summary generated from the chunks → status set honestly (scanned/image PDFs land in "needs review", not pretended-done).
 
-**Gaps:** PDF tables are kept as text (no table reconstruction yet); scanned PDFs need OCR (not built).
+**Gaps:** PDF tables are kept as text (no table reconstruction yet); scanned PDFs need OCR (not built); questionnaires page cannot yet pick data-room documents; feature pages cannot upload fresh docs inline (pick-only).
 
-**Status: LIVE** (gaps noted).
+**Status: LIVE** — nested folders shipped and verified 2026-11-25 (gaps noted).
 
 ## 3. AI Assistant
 
