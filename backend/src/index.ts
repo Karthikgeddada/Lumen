@@ -17,6 +17,7 @@ import analyticsRoutes from './routes/analytics';
 import dashboardRoutes from './routes/dashboard';
 import notificationRoutes from './routes/notifications';
 import covenantRoutes from './routes/covenants';
+import qualityRoutes from './routes/quality';
 
 const app = express();
 
@@ -68,6 +69,7 @@ app.use('/api', generalLimiter, extractionRoutes);
 app.use('/api', generalLimiter, questionnaireRoutes);
 app.use('/api', generalLimiter, analyticsRoutes);
 app.use('/api', generalLimiter, covenantRoutes);
+app.use('/api', generalLimiter, qualityRoutes);
 app.use('/api', generalLimiter, dashboardRoutes);
 app.use('/api/notifications', generalLimiter, notificationRoutes);
 

@@ -19,7 +19,12 @@ interface DocDetail {
   uploadedAt: string; processedAt: string | null;
   collection: { id: string; name: string } | null;
   owner: { id: string; firstName: string; lastName: string } | null;
-  summary: { summary: string; keyFacts: string[]; figures: Record<string, unknown>[]; model: string } | null;
+  summary: {
+    summary: string;
+    keyFacts: { label: string; value: string; page?: number | null }[];
+    figures: { label: string; value: string; unit?: string | null; page?: number | null }[];
+    model: string;
+  } | null;
   sections: { id: string; kind: string; headingPath: string[]; page: number | null; text: string; order: number }[];
   tables: { id: string; sheet: string | null; title: string | null; header: string[]; rows: { id: string; rowIndex: number; cells: string[] }[] }[];
   _count: { chunks: number; tables: number; sections: number };
@@ -155,11 +160,40 @@ export default function DocumentViewer() {
                   <div className="card-header"><div className="card-title">Key facts</div></div>
                   <div style={{ padding: '8px 20px' }}>
                     {doc.summary?.keyFacts?.length ? doc.summary.keyFacts.map((f, i) => (
-                      <div key={i} style={{ padding: '10px 0', borderBottom: i < doc.summary!.keyFacts.length - 1 ? '1px solid var(--border)' : 'none', fontSize: 13.2 }}>
-                        {f}
+                      <div key={i} style={{
+                        padding: '10px 0', borderBottom: i < doc.summary!.keyFacts.length - 1 ? '1px solid var(--border)' : 'none',
+                        fontSize: 13.2, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12,
+                      }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{f.label}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
+                          <span className="mono" style={{ fontWeight: 600 }}>{f.value}</span>
+                          {f.page ? <span className="badge">p.{f.page}</span> : null}
+                        </span>
                       </div>
                     )) : (
                       <div style={{ padding: '14px 0', fontSize: 13, color: 'var(--text-muted)' }}>No key facts extracted.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Key figures</div>
+                    <span className="card-sub">with source page</span>
+                  </div>
+                  <div style={{ padding: '8px 20px' }}>
+                    {doc.summary?.figures?.length ? doc.summary.figures.map((f, i) => (
+                      <div key={i} style={{
+                        padding: '10px 0', borderBottom: i < doc.summary!.figures.length - 1 ? '1px solid var(--border)' : 'none',
+                        fontSize: 13.2, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12,
+                      }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{f.label}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
+                          <span className="mono" style={{ fontWeight: 640 }}>{f.value}{f.unit ? ` ${f.unit}` : ''}</span>
+                          {f.page ? <span className="badge">p.{f.page}</span> : null}
+                        </span>
+                      </div>
+                    )) : (
+                      <div style={{ padding: '14px 0', fontSize: 13, color: 'var(--text-muted)' }}>No figures extracted.</div>
                     )}
                   </div>
                 </div>
