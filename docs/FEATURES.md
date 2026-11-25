@@ -49,14 +49,15 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 **What it can do today:**
 - Chat grounded in your workspace documents
 - Every claim carries **[n] citations** → exact page or spreadsheet sheet → click through to the source
-- Conversation history per user
-- Refuses to answer from thin air — only cites retrieved chunks; prompt-injection guardrails active
+- **Scope control, honestly enforced**: answer from everything, a whole folder (collection), one document, or **several documents you pick** — the scope is stored on the conversation, shown in the composer, and changing it mid-conversation applies immediately
+- Conversation history per user; streaming responses
+- Refuses to answer from thin air — only cites retrieved chunks; prompt-injection guardrails active; when phrasing doesn't keyword-match, retrieval falls back to the scoped documents' real text instead of a false "no evidence"
 
-**Internally:** your question → hybrid search (keyword scoring + local embedding similarity, blended) over chunks from the documents you selected → top chunks rendered into the prompt with citation numbers → LLM answers → answer + citations stored.
+**Internally:** your question → hybrid search (keyword scoring + local embedding similarity, blended) over chunks from the documents in scope → top chunks rendered into the prompt with citation numbers → LLM answers → answer + citations stored.
 
-**Gaps:** needs the backend awake — when the free host sleeps, you see "failed to fetch" (root cause: cold start, not the feature; fixed by the keep-alive ping / paid tier).
+**Gaps:** needs the backend awake — when the free host sleeps, you see "failed to fetch" (root cause: cold start, not the feature; fixed by the keep-alive ping / paid tier). Seeded demo documents carry no embeddings, so demo semantic matching relies on the fallback path.
 
-**Status: LIVE.**
+**Status: LIVE** — scope + fallback fixes shipped and prod-verified 2026-11-25.
 
 ## 4. Data Extraction
 
