@@ -88,11 +88,11 @@ export function Shell({ children }: { children: ReactNode }) {
     {
       section: 'Workspace',
       items: [
-        { href: '/library', label: 'Document Library', icon: Library },
+        { href: '/library', label: 'Data Room', icon: Library },
         { href: '/assistant', label: 'AI Assistant', icon: MessagesSquare },
         { href: '/extraction', label: 'Data Extraction', icon: ClipboardCheck },
-        { href: '/questionnaires', label: 'Questionnaires', icon: FileSpreadsheet },
-        { href: '/analytics', label: 'Analytics', icon: LineChart },
+        { href: '/questionnaires', label: 'Diligence Questionnaires', icon: FileSpreadsheet },
+        { href: '/analytics', label: 'Portfolio Analytics', icon: LineChart },
         { href: '/covenants', label: 'Covenants', icon: Scale },
       ],
     },

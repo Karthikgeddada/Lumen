@@ -72,7 +72,7 @@ export default function SignIn() {
             New to Lumen? <Link href="/register">Create an account</Link>
           </div>
         </div>
-        <div className="auth-foot">© 2026 Lumen Document Intelligence</div>
+        <div className="auth-foot">© 2026 Lumen — Covenant & Portfolio Intelligence</div>
       </div>
     </div>
   );

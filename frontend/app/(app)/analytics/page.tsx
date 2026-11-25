@@ -43,8 +43,8 @@ export default function Analytics() {
     <main className="content">
       <div className="page-head">
         <div>
-          <div className="page-title">Analytics</div>
-          <div className="page-desc">Quarterly metrics per entity — reported values, calculated figures, and AI-inferred data, each labeled honestly.</div>
+          <div className="page-title">Portfolio Analytics</div>
+          <div className="page-desc">Quarterly metrics per portfolio company — reported values, calculated figures, and AI-inferred data, each labeled honestly.</div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <div className="tabs">

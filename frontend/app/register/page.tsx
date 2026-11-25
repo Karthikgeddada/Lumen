@@ -129,7 +129,7 @@ function RegisterInner() {
         <div className="auth-brand"><span className="mark">L</span> Lumen</div>
         <div className="card card-pad">
           <div className="auth-title">Create your account</div>
-          <div className="auth-sub" style={{ marginBottom: 22 }}>Start reading, questioning, and extracting from documents.</div>
+          <div className="auth-sub" style={{ marginBottom: 22 }}>Upload credit agreements and borrower financials — Lumen reads, extracts, and tests them, with citations for every number.</div>
           <ErrorBanner message={error} />
           {params.get('invite') ? (
             <div className="badge badge-blue" style={{ marginBottom: 14 }}>You have a pending team invitation</div>
@@ -167,7 +167,7 @@ function RegisterInner() {
             Already have an account? <Link href="/sign-in">Sign in</Link>
           </div>
         </div>
-        <div className="auth-foot">© 2026 Lumen Document Intelligence</div>
+        <div className="auth-foot">© 2026 Lumen — Covenant & Portfolio Intelligence</div>
       </div>
     </div>
   );

@@ -51,7 +51,7 @@ export default function Library() {
     <main className="content">
       <div className="page-head">
         <div>
-          <div className="page-title">Document Library</div>
+          <div className="page-title">Data Room</div>
           <div className="page-desc">
             {data ? `${data.meta.total} document${data.meta.total === 1 ? '' : 's'} in ${workspace?.workspace.name}` : 'All workspace documents'}
           </div>

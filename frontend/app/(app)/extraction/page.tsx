@@ -52,7 +52,7 @@ export default function Extraction() {
       <div className="page-head">
         <div>
           <div className="page-title">Data Extraction</div>
-          <div className="page-desc">Turn documents into structured, citable data — every value with its source page, sheet, or cell.</div>
+          <div className="page-desc">Turn borrower documents into structured, citable financial data — every value with its source page, sheet, or cell.</div>
         </div>
         <button className="btn btn-primary" onClick={() => setCreateOpen(true)} disabled={!can('EDITOR')}>
           <Plus size={15} /> New extraction

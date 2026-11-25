@@ -53,8 +53,8 @@ export default function Questionnaires() {
     <main className="content">
       <div className="page-head">
         <div>
-          <div className="page-title">Questionnaires</div>
-          <div className="page-desc">Import from Excel, build in-app, or let Lumen draft answers from your documents — every answer carries evidence.</div>
+          <div className="page-title">Diligence Questionnaires</div>
+          <div className="page-desc">DDQs and portfolio questionnaires — import from Excel, build in-app, or let Lumen draft answers from your documents. Every answer carries evidence.</div>
         </div>
         {can('EDITOR') ? (
           <button className="btn btn-primary" onClick={() => setCreateOpen(true)}><Plus size={15} /> New questionnaire</button>

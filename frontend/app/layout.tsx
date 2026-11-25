@@ -4,8 +4,8 @@ import { AuthProvider } from '../lib/auth';
 import { WorkspaceProvider } from '../lib/workspace';
 
 export const metadata: Metadata = {
-  title: 'Lumen — Document Intelligence',
-  description: 'Read, question, and extract from your documents with verifiable AI.',
+  title: 'Lumen — Covenant & Portfolio Intelligence',
+  description: 'AI-native covenant testing and portfolio monitoring for private credit — every number traced to its source clause.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
