@@ -7,7 +7,7 @@ import useSWR from 'swr';
 import {
   LayoutGrid, Library, MessagesSquare, ClipboardCheck, FileSpreadsheet,
   LineChart, Users, Settings, Search, Bell, ChevronsUpDown, Plus, LogOut,
-  Check, FileText, PanelLeftClose, PanelLeftOpen,
+  Check, FileText, PanelLeftClose, PanelLeftOpen, Scale,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
@@ -93,6 +93,7 @@ export function Shell({ children }: { children: ReactNode }) {
         { href: '/extraction', label: 'Data Extraction', icon: ClipboardCheck },
         { href: '/questionnaires', label: 'Questionnaires', icon: FileSpreadsheet },
         { href: '/analytics', label: 'Analytics', icon: LineChart },
+        { href: '/covenants', label: 'Covenants', icon: Scale },
       ],
     },
     { section: 'Manage', items: [{ href: '/team', label: 'Workspaces & Team', icon: Users }, { href: '/settings', label: 'Settings', icon: Settings }] },

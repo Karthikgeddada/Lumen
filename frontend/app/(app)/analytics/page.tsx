@@ -27,17 +27,17 @@ export default function Analytics() {
   const [reportOpen, setReportOpen] = useState(false);
 
   const { data: entData } = useSWR(wid ? `ent-${wid}` : null,
-    () => api<{ entities: Entity[] }>(`/api/workspaces/${wid}/analytics/entities`));
+    () => api<{ entities: Entity[] }>(`/api/${wid}/analytics/entities`));
 
   const effectiveEntity = entityId ?? entData?.entities?.[0]?.id ?? null;
 
   const { data: overview, isLoading } = useSWR(
     effectiveEntity ? `ov-${effectiveEntity}-${quarters}` : null,
-    () => api<{ overview: Overview }>(`/api/workspaces/${wid}/analytics/overview${`?entityId=${effectiveEntity}&quarters=${quarters}`}`),
+    () => api<{ overview: Overview }>(`/api/${wid}/analytics/overview${`?entityId=${effectiveEntity}&quarters=${quarters}`}`),
   );
 
   const { data: repData, mutate: refetchReports } = useSWR(wid ? `rep-${wid}` : null,
-    () => api<{ reports: Report[] }>(`/api/workspaces/${wid}/analytics/reports`));
+    () => api<{ reports: Report[] }>(`/api/${wid}/analytics/reports`));
 
   return (
     <main className="content">
@@ -198,7 +198,7 @@ function NewReport({ open, onClose, workspaceId, entityId, entities, onCreated }
     e.preventDefault();
     setBusy(true);
     try {
-      await api(`/api/workspaces/${workspaceId}/analytics/reports`, {
+      await api(`/api/${workspaceId}/analytics/reports`, {
         method: 'POST', body: { title, entityId: ent, schedule },
       });
       setTitle(''); onCreated();

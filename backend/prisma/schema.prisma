@@ -181,6 +181,7 @@ model Workspace {
   notifications   Notification[]
   auditEvents     AuditEvent[]
   templates       ExtractionTemplate[]
+  covenantDefinitions CovenantDefinition[]
 
   @@index([slug])
 }
@@ -274,6 +275,7 @@ model Document {
   citations Citation[]
   results   ExtractionResult[]
   evidence AnswerEvidence[]
+  covenantDefinitions CovenantDefinition[]
 
   @@index([workspaceId, status])
   @@index([collectionId])
@@ -568,6 +570,7 @@ model Entity {
   workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   observations MetricObservation[]
   reports     Report[]
+  covenantDefinitions CovenantDefinition[]
 
   @@unique([workspaceId, name])
 }
@@ -614,6 +617,77 @@ model Report {
   entity    Entity?   @relation(fields: [entityId], references: [id])
 
   @@index([workspaceId])
+}
+
+// ── Covenants ────────────────────────────────────────────────────────────
+
+enum CovenantComparator {
+  LTE // value must stay at or below threshold (maximum covenants)
+  GTE // value must stay at or above threshold (minimum covenants)
+}
+
+enum CovenantStatus {
+  AI_INFERRED
+  REVIEWED
+}
+
+enum CovenantResultStatus {
+  PASS
+  FAIL
+  NOT_TESTED
+  WAIVED
+}
+
+// A covenant extracted from a credit agreement (or defined manually), linked
+// to the metric it constrains and the clause it came from.
+model CovenantDefinition {
+  id           String              @id @default(cuid())
+  workspaceId  String
+  entityId     String
+  documentId   String?             // credit agreement the covenant was extracted from
+  key          String              // e.g. max_net_leverage
+  label        String              // "Maximum net leverage"
+  description  String?             @db.Text
+  metricKey    String              // MetricObservation.metricKey this covenant tests
+  comparator   CovenantComparator
+  threshold    Float
+  unit         String              @default("x") // x | % | USD | days
+  period       String              @default("quarter") // quarter | ttm
+  sourceExcerpt String?            @db.Text
+  sourcePage   Int?
+  confidence   Float               @default(0)
+  status       CovenantStatus      @default(AI_INFERRED)
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdById String
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  entity    Entity            @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  document  Document?         @relation(fields: [documentId], references: [id])
+  results   CovenantResult[]
+
+  @@unique([entityId, key])
+  @@index([workspaceId])
+}
+
+// One covenant tested against one period's observed metric value.
+model CovenantResult {
+  id           String               @id @default(cuid())
+  definitionId String
+  period       String               // e.g. "Q3 2026"
+  value        Float?
+  status       CovenantResultStatus
+  headroom     Float?               // signed distance to threshold; positive = compliant
+  observationId String?             // MetricObservation backing the value
+  computedAt   DateTime             @default(now())
+
+  definition CovenantDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@unique([definitionId, period])
+  @@index([definitionId, period])
 }
 
 // ── Notifications, audit, jobs ───────────────────────────────────────────
