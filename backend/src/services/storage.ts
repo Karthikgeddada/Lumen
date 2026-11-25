@@ -61,11 +61,28 @@ export async function getObject(key: string): Promise<Buffer> {
     if (!row) throw new Error(`Stored object not found: ${key}`);
     return Buffer.from(row.data);
   }
-  const res = await client.send(new GetObjectCommand({ Bucket: config.storage.bucket, Key: key }));
-  const stream = res.Body as Readable;
-  const parts: Buffer[] = [];
-  for await (const chunk of stream) parts.push(chunk as Buffer);
-  return Buffer.concat(parts);
+  try {
+    const res = await client.send(new GetObjectCommand({ Bucket: config.storage.bucket, Key: key }));
+    const stream = res.Body as Readable;
+    const parts: Buffer[] = [];
+    for await (const chunk of stream) parts.push(chunk as Buffer);
+    return Buffer.concat(parts);
+  } catch (err) {
+    // Objects uploaded before S3 mode was enabled still live in Postgres.
+    // Serve them from the DB and lazily copy them to S3 so the workspace can
+    // move to object storage without any downtime or manual migration.
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (e.name === 'NoSuchKey' || e.$metadata?.httpStatusCode === 404) {
+      const row = await prisma.storedObject.findUnique({ where: { key } });
+      if (!row) throw new Error(`Stored object not found: ${key}`);
+      const body = Buffer.from(row.data);
+      void client
+        .send(new PutObjectCommand({ Bucket: config.storage.bucket, Key: key, Body: body, ContentType: row.contentType }))
+        .catch(() => {});
+      return body;
+    }
+    throw err;
+  }
 }
 
 // Fetch a stored object's bytes + type directly (db-mode streaming endpoint).
@@ -120,4 +137,6 @@ export async function deleteObject(key: string): Promise<void> {
     return;
   }
   await client.send(new DeleteObjectCommand({ Bucket: config.storage.bucket, Key: key }));
+  // Also clear any legacy DB copy of the same object.
+  await prisma.storedObject.deleteMany({ where: { key } }).catch(() => {});
 }
