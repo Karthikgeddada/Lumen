@@ -127,7 +127,31 @@ export async function retrieve(
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.filter((c) => c.score > 0).slice(0, k);
+  const hits = scored.filter((c) => c.score > 0);
+  if (hits.length) return hits.slice(0, k);
+
+  // Fallback: no keyword hit and no embeddings to rescue the match (e.g. seeded
+  // demo chunks, which carry no embeddings). Rather than claiming "no evidence"
+  // while the scoped documents demonstrably have content, show the model the
+  // first chunks of those documents — it can then answer from real text, or
+  // honestly say the documents do not cover the question.
+  return candidatePool
+    .slice()
+    .sort((a, b) => (a.page ?? 0) - (b.page ?? 0))
+    .slice(0, k)
+    .map((c) => ({
+      chunkId: c.id,
+      documentId: c.documentId,
+      documentName: c.document.name,
+      page: c.page,
+      sheet: c.sheet,
+      headingPath: (c.headingPath as string[] | null) ?? [],
+      kind: c.kind,
+      tableId: c.tableId,
+      text: c.text,
+      embedding: c.embedding as number[] | null,
+      score: 0,
+    }));
 }
 
 // Rendered context blocks for the prompt. Citation numbers [n] map 1:1 to
