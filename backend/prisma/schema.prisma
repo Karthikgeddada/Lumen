@@ -236,14 +236,18 @@ model Collection {
   workspaceId String
   name        String
   description String?
+  parentId    String?
   createdById String
   createdAt   DateTime  @default(now())
   deletedAt   DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   documents Document[]
+  parent    Collection?  @relation("CollectionFolders", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Collection[] @relation("CollectionFolders")
 
   @@unique([workspaceId, name])
+  @@index([parentId])
 }
 
 model Document {

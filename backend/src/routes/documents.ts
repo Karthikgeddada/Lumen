@@ -167,7 +167,11 @@ router.patch(
       })
       .parse(req.body);
     if (body.collectionId) {
-      const collection = await prisma.collection.findFirst({ where: { id: body.collectionId, deletedAt: null } });
+      // Tenancy: the target folder must belong to the document's own workspace.
+      const document0 = await prisma.document.findUnique({ where: { id: req.params.documentId }, select: { workspaceId: true } });
+      const collection = await prisma.collection.findFirst({
+        where: { id: body.collectionId, workspaceId: document0?.workspaceId, deletedAt: null },
+      });
       if (!collection) throw new ApiError(404, 'NOT_FOUND', 'Collection not found.');
     }
     const document = await prisma.document.update({ where: { id: req.params.documentId }, data: body });

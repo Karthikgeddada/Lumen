@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
-import { Upload, FileText, Plus, X, FolderOpen, ChevronRight, Trash2, RotateCcw } from 'lucide-react';
+import { Upload, FileText, Plus, X, FolderOpen, ChevronDown, Trash2, RotateCcw } from 'lucide-react';
 import { api, qs } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
 import {
@@ -19,7 +19,40 @@ interface Doc {
   owner: { firstName: string; lastName: string } | null;
 }
 
-interface Collection { id: string; name: string; description: string | null; _count: { documents: number } }
+interface Collection { id: string; name: string; description: string | null; parentId: string | null; _count: { documents: number } }
+
+// Folders are nested; render depth-first so children follow parents, with depth for indentation.
+function orderTree(cols: Collection[]): { c: Collection; depth: number }[] {
+  const byParent = new Map<string | null, Collection[]>();
+  for (const c of cols) {
+    const k = c.parentId ?? null;
+    if (!byParent.has(k)) byParent.set(k, []);
+    byParent.get(k)!.push(c);
+  }
+  const out: { c: Collection; depth: number }[] = [];
+  const walk = (parent: string | null, depth: number) => {
+    for (const c of byParent.get(parent) ?? []) {
+      out.push({ c, depth });
+      walk(c.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
+}
+
+function folderPath(cols: Collection[], id: string | null): string {
+  if (!id) return '';
+  const byId = new Map(cols.map((c) => [c.id, c]));
+  const parts: string[] = [];
+  let cur = byId.get(id);
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    parts.unshift(cur.name);
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return parts.join(' / ');
+}
 
 const ACCEPT = '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt';
 
@@ -37,6 +70,7 @@ export default function Library() {
   const [uploadOpen, setUploadOpen] = useState(params.get('upload') === '1');
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
+  const [newCollectionParent, setNewCollectionParent] = useState('');
 
   const key = wid ? `/api/workspaces/${wid}/documents${qs({ q, collectionId: collection, status, sort })}` : null;
   const { data, isLoading, mutate, error } = useSWR(key, (k: string) => api<{ documents: Doc[]; meta: { total: number; page: number; pages: number } }>(k), {
@@ -86,25 +120,31 @@ export default function Library() {
         </select>
       </div>
 
-      {/* Collections — tap name to filter, trash to delete (documents survive) */}
+      {/* Folder tree — nested, indent by depth; tap name to filter, trash to delete (nothing is destroyed) */}
       {(collData?.collections?.length ?? 0) > 0 ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-          {collData!.collections.map((c) => (
-            <span key={c.id} className="badge badge-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px' }}>
+        <div className="card" style={{ padding: '8px 12px', marginBottom: 14 }}>
+          {orderTree(collData!.collections).map(({ c, depth }) => (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: depth * 22, paddingBlock: 3 }}>
+              {depth > 0 ? <ChevronDown size={12} color="var(--text-muted)" style={{ flexShrink: 0 }} /> : null}
               <button
-                onClick={() => setCollection(c.id)}
-                title={`Show only "${c.name}"`}
-                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', padding: 0, font: 'inherit' }}
+                onClick={() => setCollection(collection === c.id ? '' : c.id)}
+                title={`Show documents in "${folderPath(collData!.collections, c.id)}"`}
+                style={{
+                  border: 'none', background: collection === c.id ? 'var(--sunken)' : 'transparent', cursor: 'pointer',
+                  color: 'inherit', padding: '3px 8px', font: 'inherit', fontSize: 13, borderRadius: 6,
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}
               >
+                <FolderOpen size={14} color={collection === c.id ? 'var(--accent)' : 'var(--text-muted)'} />
                 {c.name} · {c._count.documents}
               </button>
               {can('EDITOR') ? (
                 <button
-                  title={`Delete collection "${c.name}"`}
+                  title={`Delete folder "${c.name}" (documents and subfolders are kept)`}
                   aria-label={`Delete collection ${c.name}`}
-                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#c0392b', padding: 0, display: 'inline-flex' }}
+                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#c0392b', padding: 2, display: 'inline-flex' }}
                   onClick={async () => {
-                    if (!window.confirm(`Delete collection "${c.name}"? Its documents are kept — they just lose this grouping. This cannot be undone.`)) return;
+                    if (!window.confirm(`Delete folder "${c.name}"? Its documents and subfolders are kept — they move to the top level. This cannot be undone.`)) return;
                     await api(`/api/workspaces/${wid}/collections/${c.id}`, { method: 'DELETE' });
                     if (collection === c.id) setCollection('');
                     refetchColls();
@@ -114,7 +154,7 @@ export default function Library() {
                   <Trash2 size={12} />
                 </button>
               ) : null}
-            </span>
+            </div>
           ))}
         </div>
       ) : null}
@@ -149,7 +189,23 @@ export default function Library() {
                     </Link>
                     {doc.isDemo ? <span style={{ marginLeft: 7 }}><DemoTag /></span> : null}
                   </td>
-                  <td>{doc.collection?.name ?? <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                  <td>
+                    {can('EDITOR') && !doc.isDemo ? (
+                      <select
+                        className="select"
+                        style={{ fontSize: 12, padding: '2px 6px', maxWidth: 170 }}
+                        value={doc.collection?.id ?? ''}
+                        title="Move to folder"
+                        onChange={async (e) => {
+                          await api(`/api/workspaces/${wid}/documents/${doc.id}`, { method: 'PATCH', body: { collectionId: e.target.value || null } });
+                          mutate(); refetchColls();
+                        }}
+                      >
+                        <option value="">—</option>
+                        {(collData?.collections ?? []).map((c) => <option key={c.id} value={c.id}>{folderPath(collData?.collections ?? [], c.id)}</option>)}
+                      </select>
+                    ) : (doc.collection?.name ?? <span style={{ color: 'var(--text-muted)' }}>—</span>)}
+                  </td>
                   <td className="mono" style={{ fontSize: 12.5 }}>{doc.pageCount ?? '—'}</td>
                   <td style={{ fontSize: 12.5 }}>{formatBytes(doc.sizeBytes)}</td>
                   <td><DocStatusBadge status={doc.status} /></td>
@@ -200,8 +256,12 @@ export default function Library() {
           onSubmit={async (e) => {
             e.preventDefault();
             if (!newCollectionName.trim() || !wid) return;
-            await api(`/api/workspaces/${wid}/collections`, { method: 'POST', body: { name: newCollectionName.trim() } });
+            await api(`/api/workspaces/${wid}/collections`, {
+              method: 'POST',
+              body: { name: newCollectionName.trim(), parentId: newCollectionParent || null },
+            });
             setNewCollectionName('');
+            setNewCollectionParent('');
             setNewCollectionOpen(false);
             refetchColls();
           }}
@@ -210,6 +270,12 @@ export default function Library() {
           <Field label="Collection name" hint="e.g. “Earnings 2026” or “Vendor contracts”.">
             <input className="input" required maxLength={60} value={newCollectionName}
               onChange={(e) => setNewCollectionName(e.target.value)} autoFocus />
+          </Field>
+          <Field label="Inside folder (optional)" hint="Create it inside another folder to build a nested structure.">
+            <select className="select" value={newCollectionParent} onChange={(e) => setNewCollectionParent(e.target.value)}>
+              <option value="">Top level</option>
+              {(collData?.collections ?? []).map((c) => <option key={c.id} value={c.id}>{folderPath(collData?.collections ?? [], c.id)}</option>)}
+            </select>
           </Field>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <button type="button" className="btn btn-secondary" onClick={() => setNewCollectionOpen(false)}>Cancel</button>
@@ -326,7 +392,7 @@ function UploadModal({ open, onClose, workspaceId, collections, defaultCollectio
             <Field label="Collection (optional)">
               <select className="select" value={collectionId} onChange={(e) => setCollectionId(e.target.value)}>
                 <option value="">No collection</option>
-                {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {collections.map((c) => <option key={c.id} value={c.id}>{folderPath(collections, c.id)}</option>)}
               </select>
             </Field>
           </div>
