@@ -114,8 +114,36 @@ router.patch(
   requireAuth,
   asyncH(async (req, res) => {
     const conversation = await requireConversationOwnership(req, req.params.conversationId);
-    const body = z.object({ title: z.string().trim().min(1).max(120) }).parse(req.body);
-    const updated = await prisma.conversation.update({ where: { id: conversation.id }, data: { title: body.title } });
+    const body = z
+      .object({
+        title: z.string().trim().min(1).max(120).optional(),
+        documentIds: z.array(z.string()).max(50).optional(),
+        collectionId: z.string().nullable().optional(),
+      })
+      .parse(req.body ?? {});
+    const data: { title?: string; documentIds?: string[]; collectionId?: string | null } = {};
+    if (body.title !== undefined) data.title = body.title;
+    if (body.documentIds !== undefined) {
+      // The scope can only reference documents this workspace can see.
+      data.documentIds = body.documentIds.length
+        ? (
+            await prisma.document.findMany({
+              where: { id: { in: body.documentIds }, workspaceId: conversation.workspaceId, deletedAt: null },
+              select: { id: true },
+            })
+          ).map((d) => d.id)
+        : [];
+    }
+    if (body.collectionId !== undefined) {
+      if (body.collectionId) {
+        const coll = await prisma.collection.findFirst({
+          where: { id: body.collectionId, workspaceId: conversation.workspaceId, deletedAt: null },
+        });
+        if (!coll) throw new ApiError(404, 'NOT_FOUND', 'Collection not found.');
+      }
+      data.collectionId = body.collectionId;
+    }
+    const updated = await prisma.conversation.update({ where: { id: conversation.id }, data });
     res.json({ conversation: updated });
   }),
 );

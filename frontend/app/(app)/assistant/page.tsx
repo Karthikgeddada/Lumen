@@ -37,9 +37,9 @@ export default function Assistant() {
   const [streamText, setStreamText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [scopeOpen, setScopeOpen] = useState(false);
-  const [scope, setScope] = useState<{ docIds: string[]; label: string }>(() => {
+  const [scope, setScope] = useState<{ docIds: string[]; collectionId: string | null; label: string }>(() => {
     const doc = params.get('doc');
-    return doc ? { docIds: [doc], label: 'Selected document' } : { docIds: [], label: 'All workspace documents' };
+    return doc ? { docIds: [doc], collectionId: null, label: 'Selected document' } : { docIds: [], collectionId: null, label: 'All workspace documents' };
   });
   const [evidenceCite, setEvidenceCite] = useState<Citation | null>(null);
 
@@ -58,14 +58,27 @@ export default function Assistant() {
     () => api<{ collections: Collection[] }>(`/api/workspaces/${wid}/collections`),
   );
 
-  // Load messages when opening a conversation.
+  // Load messages when opening a conversation; sync the scope label to what
+  // this conversation actually answers from (persisted on the conversation).
   useEffect(() => {
     if (!conversationId) { setMessages([]); return; }
     let cancelled = false;
     api<{ messages: Message[] }>(`/api/conversations/${conversationId}`).then((res) => {
       if (!cancelled) setMessages(res.messages);
-    }).catch(() => setMessages([]));
+    }).catch(() => { if (!cancelled) setMessages([]); });
+    const conv = convData?.conversations.find((c) => c.id === conversationId);
+    if (conv) {
+      const ids = conv.documentIds ?? [];
+      if (ids.length) {
+        setScope({ docIds: ids, collectionId: null, label: ids.length === 1 ? (docData?.documents.find((d) => d.id === ids[0])?.name ?? '1 document') : `${ids.length} documents` });
+      } else if (conv.collectionId) {
+        setScope({ docIds: [], collectionId: conv.collectionId, label: `Collection: ${collData?.collections.find((c) => c.id === conv.collectionId)?.name ?? 'collection'}` });
+      } else {
+        setScope({ docIds: [], collectionId: null, label: 'All workspace documents' });
+      }
+    }
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
   useEffect(() => {
@@ -76,12 +89,27 @@ export default function Assistant() {
     if (!wid) throw new Error('No workspace selected');
     const res = await api<{ conversation: Conversation }>(`/api/workspaces/${wid}/conversations`, {
       method: 'POST',
-      body: scope.docIds.length ? { documentIds: scope.docIds } : {},
+      body: { documentIds: scope.docIds, collectionId: scope.collectionId },
     });
     setConversationId(res.conversation.id);
     setMessages([]);
     router.replace(`/assistant?c=${res.conversation.id}`);
     return res.conversation.id;
+  }
+
+  // Apply a scope choice: for an existing conversation it persists immediately
+  // (PATCH), for a fresh one it applies on creation. Never cosmetic.
+  async function applyScope(next: { docIds: string[]; collectionId: string | null; label: string }) {
+    setScope(next);
+    setScopeOpen(false);
+    if (conversationId && wid) {
+      try {
+        await api(`/api/conversations/${conversationId}`, {
+          method: 'PATCH',
+          body: { documentIds: next.docIds, collectionId: next.collectionId },
+        });
+      } catch { /* scope falls back to what the conversation already has */ }
+    }
   }
 
   async function send(e?: React.FormEvent) {
@@ -242,18 +270,18 @@ export default function Assistant() {
           Choose which documents the assistant may use. Only documents in this workspace are ever reachable.
         </div>
         <button
-          className="nav-item" style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 8, cursor: 'pointer', background: scope.docIds.length === 0 ? 'var(--blue-tint)' : 'transparent' }}
-          onClick={() => { setScope({ docIds: [], label: 'All workspace documents' }); setScopeOpen(false); }}>
+          className="nav-item" style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', marginBottom: 8, cursor: 'pointer', background: scope.docIds.length === 0 && !scope.collectionId ? 'var(--blue-tint)' : 'transparent' }}
+          onClick={() => applyScope({ docIds: [], collectionId: null, label: 'All workspace documents' })}>
           <Library size={15} /> Everything in this workspace
         </button>
-        <div className="nav-label" style={{ marginTop: 10 }}>Individual documents</div>
+        <div className="nav-label" style={{ marginTop: 10 }}>Documents — tap to pick several</div>
         <div style={{ maxHeight: 240, overflowY: 'auto' }}>
           {(docData?.documents ?? []).map((d) => (
             <button key={d.id} className="nav-item" style={{
-              width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', borderRadius: 'var(--r-sm)',
+              width: '100%', border: 'none', background: scope.docIds.includes(d.id) ? 'var(--blue-tint)' : 'transparent', cursor: 'pointer', borderRadius: 'var(--r-sm)',
             }} onClick={() => {
-              setScope({ docIds: [d.id], label: d.name.length > 32 ? `${d.name.slice(0, 30)}…` : d.name });
-              setScopeOpen(false);
+              const ids = scope.docIds.includes(d.id) ? scope.docIds.filter((x) => x !== d.id) : [...scope.docIds, d.id];
+              setScope({ ...scope, docIds: ids, collectionId: null, label: ids.length ? (ids.length === 1 ? d.name : `${ids.length} documents`) : 'All workspace documents' });
             }}>
               <MessagesSquare size={14} style={{ flexShrink: 0 }} />
               <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
@@ -264,8 +292,8 @@ export default function Assistant() {
           <>
             <div className="nav-label" style={{ marginTop: 10 }}>Collections</div>
             {collData.collections.map((c) => (
-              <button key={c.id} className="nav-item" style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer' }}
-                onClick={() => { setScope({ docIds: [], label: `Collection: ${c.name}` }); setScopeOpen(false); }}>
+              <button key={c.id} className="nav-item" style={{ width: '100%', border: 'none', background: scope.collectionId === c.id ? 'var(--blue-tint)' : 'transparent', cursor: 'pointer' }}
+                onClick={() => applyScope({ docIds: [], collectionId: c.id, label: `Collection: ${c.name}` })}>
                 <Library size={14} /> {c.name}
               </button>
             ))}
