@@ -86,7 +86,7 @@ export async function retrieve(
   const terms = queryTerms(query);
 
   // Candidate set: keyword-matched chunks (bounded), so huge workspaces stay fast.
-  const candidatePool = await prisma.documentChunk.findMany({
+  let candidatePool = await prisma.documentChunk.findMany({
     where: terms.length
       ? { ...where, OR: terms.map((t) => ({ text: { contains: t, mode: 'insensitive' as const } })) }
       : where,
@@ -97,6 +97,23 @@ export async function retrieve(
     },
     take: 2000,
   });
+
+  // The keyword candidate query can legitimately match nothing (phrased question
+  // whose words never appear verbatim, and chunks without embeddings). Retry
+  // without the keyword filter so the scoped documents' real content is still
+  // available to the model instead of a false "no evidence".
+  if (!candidatePool.length && terms.length) {
+    candidatePool = await prisma.documentChunk.findMany({
+      where,
+      select: {
+        id: true, page: true, sheet: true, headingPath: true, kind: true, tableId: true,
+        text: true, embedding: true, documentId: true,
+        document: { select: { name: true } },
+      },
+      orderBy: [{ documentId: 'asc' }, { page: 'asc' }],
+      take: 50,
+    });
+  }
 
   let queryEmb: number[] | null = null;
   if (hasAI() && candidatePool.some((c) => c.embedding)) {
