@@ -1,4 +1,5 @@
 import { prisma } from '../prisma';
+import { parseNumericValue } from './normalizer';
 
 // Analytics are derived from actual stored data — extraction results and
 // metric observations — and every value keeps its derivation (REPORTED /
@@ -106,8 +107,9 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
 
   let created = 0;
   for (const r of task.results) {
-    const numeric = parseFloat(String(r.value ?? '').replace(/[^0-9.\-]/g, ''));
-    if (!Number.isFinite(numeric) || !r.document) continue;
+    // Real parsing: "4.82 billion" → 4.82e9, "(1,234)" → -1234 — not naive digit-stripping.
+    const numeric = parseNumericValue(r.value, r.unit);
+    if (numeric == null || !r.document) continue;
 
     const period = r.document.name.match(/(Q[1-4]\s?\d{4}|\d{4})/i)?.[0]?.replace(/\s/, ' ') ?? null;
     if (!period) continue;
