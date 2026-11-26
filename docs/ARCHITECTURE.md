@@ -123,7 +123,7 @@ Supabase Storage (current S3 target): bucket `lumen-documents`, region `ap-north
 
 ## 10. Tests & CI (2026-11-26)
 
-- `npm test` (backend) runs Vitest: 83 tests — 25 canonical normalizer cases, 12 mandated scale cases (thousands/millions/billions/"000s"/"$ in 000"/mixed/per-share exception/double-scaling guard/missing scale/conflicting scales/unit-vs-table precedence/ratio exemption), plus pattern and detailed-parse checks, and 25 trust-rule cases (scale-resolution, verification gate, ingest refusal, covenant NOT_TESTED-with-reason). Files: `src/services/normalizer.test.ts`, `src/services/scale.test.ts`, `src/services/trust.test.ts`.
+- `npm test` (backend) runs Vitest: `src/services/normalizer.test.ts` (25 canonical parse cases via `it.each`), `src/services/scale.test.ts` (12 mandated scale cases — thousands/millions/billions/"000s"/"$ in 000"/mixed/per-share exception/double-scaling guard/missing scale/conflicting scales/unit-vs-table precedence/ratio exemption — plus pattern and detailed-parse checks), and `src/services/trust.test.ts` (25 trust-rule cases: scale-resolution, verification gate, ingest refusal, covenant NOT_TESTED-with-reason).
 - `npm run typecheck` (backend) and `npx tsc --noEmit` (frontend) gate both apps.
 - GitHub Actions (`.github/workflows/ci.yml`) runs backend `npm ci → prisma generate → typecheck → test` and frontend `npm ci → tsc --noEmit` on every push and pull request (free tier).
 
