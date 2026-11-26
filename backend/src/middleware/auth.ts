@@ -30,12 +30,35 @@ export function newRefreshToken(): string {
 export { sha256 as hashToken };
 
 // ── authentication ──────────────────────────────────────────────────────
+// Short-TTL in-process caches sit in front of the session/user/membership
+// DB lookups — they were 3-4 sequential Postgres round-trips on EVERY
+// request, which dominated warm latency on free-tier Postgres. Entries
+// expire after 30s, so sign-outs, deletions and role changes take effect
+// within 30s (well inside the access-token lifetime; revoking a session
+// still blocks the next token refresh).
+const AUTH_TTL_MS = 30_000;
+const authCache = new Map<string, { userId: string; sessionId: string; at: number }>();
+const memberCache = new Map<string, { role: WorkspaceRole; at: number }>();
+
+function sweep<V extends { at: number }>(map: Map<string, V>, now: number) {
+  // opportunistic prune so the maps stay tiny; runs on insert only
+  if (map.size < 2048) return;
+  for (const [k, v] of map) if (now - v.at > AUTH_TTL_MS * 5) map.delete(k);
+}
+
 // Accepts the short-lived access token via `Authorization: Bearer <jwt>`.
 // Checks the backing session is still alive so signout revokes everywhere.
 export const requireAuth = asyncH(async (req: Request, _res: Response, next: NextFunction) => {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token) throw new ApiError(401, 'UNAUTHENTICATED', 'Authentication required.');
+
+  const now = Date.now();
+  const cached = authCache.get(token);
+  if (cached && now - cached.at < AUTH_TTL_MS) {
+    req.auth = { userId: cached.userId, sessionId: cached.sessionId };
+    return next();
+  }
 
   let payload: { userId: string; sessionId: string };
   try {
@@ -58,6 +81,8 @@ export const requireAuth = asyncH(async (req: Request, _res: Response, next: Nex
   });
   if (!user || user.deletedAt) throw new ApiError(401, 'SESSION_ENDED', 'Session has ended.');
 
+  authCache.set(token, { userId: user.id, sessionId: session.id, at: now });
+  sweep(authCache, now);
   req.auth = { userId: user.id, sessionId: session.id };
   next();
 });
@@ -87,18 +112,27 @@ export function requireWorkspace(minRole: WorkspaceRole = 'VIEWER') {
       ((req.query as Record<string, unknown>).workspaceId as string | undefined);
     if (!wid) throw new ApiError(400, 'WORKSPACE_REQUIRED', 'A workspace id is required.');
 
-    const membership = await prisma.membership.findFirst({
-      where: { workspaceId: wid, userId: req.auth.userId, deletedAt: null },
-      select: { role: true, workspace: { select: { id: true, deletedAt: true } } },
-    });
-    // 404 (not 403) when not a member — never leak that a workspace exists.
-    if (!membership || membership.workspace.deletedAt) {
-      throw new ApiError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found.');
+    const cacheKey = `${wid}:${req.auth.userId}`;
+    const now = Date.now();
+    const cached = memberCache.get(cacheKey);
+    let role: WorkspaceRole | undefined = cached && now - cached.at < AUTH_TTL_MS ? cached.role : undefined;
+    if (!role) {
+      const membership = await prisma.membership.findFirst({
+        where: { workspaceId: wid, userId: req.auth.userId, deletedAt: null },
+        select: { role: true, workspace: { select: { deletedAt: true } } },
+      });
+      // 404 (not 403) when not a member — never leak that a workspace exists.
+      if (!membership || membership.workspace.deletedAt) {
+        throw new ApiError(404, 'WORKSPACE_NOT_FOUND', 'Workspace not found.');
+      }
+      role = membership.role;
+      memberCache.set(cacheKey, { role, at: now });
+      sweep(memberCache, now);
     }
-    if (!roleAtLeast(membership.role, minRole)) {
+    if (!roleAtLeast(role, minRole)) {
       throw new ApiError(403, 'FORBIDDEN', 'You do not have permission to perform this action.');
     }
-    req.ws = { id: wid, role: membership.role };
+    req.ws = { id: wid, role };
     next();
   });
 }

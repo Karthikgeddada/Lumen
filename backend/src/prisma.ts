@@ -12,3 +12,16 @@ import { config } from './config';
 export const prisma = new PrismaClient({
   log: config.isProd ? ['error', 'warn'] : ['error', 'warn'],
 });
+
+// Keep-alive: Neon's free tier suspends its Postgres compute after a few
+// idle minutes, and the wake-up adds seconds to the next query. A cheap
+// SELECT 1 every 4 minutes counts as activity and keeps the compute (and
+// the Prisma connection pool) warm. Harmless on any provider. unref() so
+// it never blocks process shutdown.
+if (config.isProd) {
+  const ping = () => {
+    prisma.$queryRaw`SELECT 1`.catch(() => {});
+  };
+  ping();
+  setInterval(ping, 4 * 60_000).unref();
+}
