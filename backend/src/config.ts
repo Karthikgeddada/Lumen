@@ -38,6 +38,9 @@ export const config = {
     // 'local' = run an open-source embedding model in-process (transformers.js)
     embeddingBaseUrl: process.env.AI_EMBEDDING_BASE_URL || '',
     embeddingModel: process.env.AI_EMBEDDING_MODEL || 'text-embedding-3-small',
+    // Every provider HTTP call aborts after this long (default 60 s) so a hung
+    // upstream can never pin an API request or a worker job.
+    timeoutMs: num(process.env.AI_TIMEOUT_MS, 60_000),
   },
 
   storage: {

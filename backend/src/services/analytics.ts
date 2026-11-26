@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { parseNumericValueDetailed } from './normalizer';
 import { runCovenantTests } from './covenants';
+import { scaleUnresolved } from './trust';
 
 // Analytics are derived from actual stored data — extraction results and
 // metric observations — and every value keeps its derivation (REPORTED /
@@ -92,7 +93,10 @@ export async function entityOverview(entityId: string, quarters = 4) {
 
 // Derive metric observations from VERIFIED extraction results. These are
 // AI-inferred until a reviewer has verified the underlying extraction.
-export async function ingestFromExtraction(workspaceId: string, taskId: string): Promise<number> {
+export async function ingestFromExtraction(
+  workspaceId: string,
+  taskId: string,
+): Promise<{ created: number; refused: number }> {
   const task = await prisma.extractionTask.findUnique({
     where: { id: taskId },
     include: {
@@ -102,12 +106,13 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
       },
     },
   });
-  if (!task) return 0;
+  if (!task) return { created: 0, refused: 0 };
 
   const entity = await prisma.entity.findFirst({ where: { workspaceId, name: task.name } });
-  if (!entity) return 0;
+  if (!entity) return { created: 0, refused: 0 };
 
   let created = 0;
+  let refused = 0; // TRUST RULE: VERIFIED results whose scale is still unresolved
   const affectedPeriods = new Set<string>();
   for (const r of task.results) {
     // Scale-aware parsing: parseNumericValueDetailed reports whether the value
@@ -122,7 +127,15 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
         appliedFrom: string | null;
         flags: string[];
         provenance: { label: string | null; headerText: string | null; from: string } | null;
+        resolution?: { by: string; at: string; multiplier: number | null; label?: string | null; note?: string | null } | null;
+        unresolved?: boolean;
       } | null) ?? null;
+    // TRUST RULE: an unresolved flagged figure never becomes an observation,
+    // no matter who verified it — resolution must be explicit.
+    if (scaleUnresolved(scaleInfo)) {
+      refused++;
+      continue;
+    }
     const numeric = scaleInfo?.multiplier != null ? detail.value * scaleInfo.multiplier : detail.value;
     if (!Number.isFinite(numeric)) continue;
 
@@ -149,7 +162,7 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
         sourceDocumentId: r.documentId,
         sourcePage: r.page,
         sourceExcerpt: r.excerpt,
-        scale: scaleInfo ?? Prisma.JsonNull,
+        scale: (scaleInfo ? { ...scaleInfo, unresolved: false } : null) ?? Prisma.JsonNull,
         extractionResultId: r.id,
       },
       update: {
@@ -159,7 +172,7 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
         sourceDocumentId: r.documentId,
         sourcePage: r.page,
         sourceExcerpt: r.excerpt,
-        scale: scaleInfo ?? Prisma.JsonNull,
+        scale: (scaleInfo ? { ...scaleInfo, unresolved: false } : null) ?? Prisma.JsonNull,
         extractionResultId: r.id,
       },
     });
@@ -172,7 +185,7 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
   for (const period of affectedPeriods) {
     void runCovenantTests(workspaceId, entity.id, period).catch(() => {});
   }
-  return created;
+  return { created, refused };
 }
 
 // Scheduled reports support simple recurring cadences: daily | weekly | monthly.

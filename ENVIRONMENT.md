@@ -21,6 +21,7 @@ Copy the `.env.example` in each package to `.env` (backend) / `.env.local` (fron
 | `AI_CHAT_MODEL` | recommended | e.g. `gpt-4o-mini`. Used for summaries, assistant answers, extraction, questionnaires. |
 | `AI_EMBEDDING_BASE_URL` | optional | Defaults to the same `AI_BASE_URL`. Set to `local` to run the embedding model **in-process** via transformers.js — no API or key needed (e.g. with OpenRouter, which has no embeddings endpoint). |
 | `AI_EMBEDDING_MODEL` | recommended | API model (e.g. `text-embedding-3-small`), or with `AI_EMBEDDING_BASE_URL=local`, an open-source model id like `Xenova/all-MiniLM-L6-v2` (384-dim, ONNX). Used to embed chunks for semantic retrieval. |
+| `AI_TIMEOUT_MS` | optional | Abort timeout for every AI provider HTTP call, in milliseconds (default 60000). A hung provider request can never pin a worker. |
 | `STORAGE_ENDPOINT` | yes (prod) | S3-compatible endpoint (AWS S3, Cloudflare R2, Backblaze B2, MinIO…). Render disks are ephemeral, so uploads must live in object storage. |
 | `STORAGE_REGION` / `STORAGE_BUCKET` | yes (prod) | Bucket region and name for document storage. |
 | `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | yes (prod) | Bucket credentials with put/get/delete on the bucket. |

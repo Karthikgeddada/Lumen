@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { z } from 'zod';
 import { prisma } from '../prisma';
@@ -8,6 +9,7 @@ import { audit } from '../utils';
 import { enqueue } from '../services/queue';
 import { runExtraction, suggestFields } from '../services/extract';
 import { ingestFromExtraction } from '../services/analytics';
+import { applyScaleResolution, scaleFlags, scaleUnresolved } from '../services/trust';
 
 const router = Router();
 
@@ -273,8 +275,30 @@ router.patch(
         status: z.enum(['VERIFIED', 'NEEDS_REVIEW', 'REJECTED', 'MISSING']).optional(),
         flagged: z.boolean().optional(),
         note: z.string().trim().max(500).optional(),
+        // TRUST RULE: verifying a figure with unresolved scale flags requires
+        // an explicit resolution — confirm as shown, or supply the correct scale.
+        scaleResolution: z
+          .union([
+            z.object({ confirm: z.literal(true), note: z.string().trim().max(500).optional() }),
+            z.object({ multiplier: z.number().finite(), label: z.string().trim().max(40).optional(), note: z.string().trim().max(500).optional() }),
+          ])
+          .optional(),
       })
       .parse(req.body);
+
+    // TRUST RULE: a flagged figure can never be verified silently — the
+    // analyst must explicitly confirm it or supply the correct scale.
+    if (body.status === 'VERIFIED' && scaleUnresolved(result.scale) && !body.scaleResolution) {
+      throw new ApiError(
+        422,
+        'UNRESOLVED_SCALE',
+        'This figure has unresolved scale flags. Confirm it as shown or supply the correct scale before verifying.',
+        { flags: scaleFlags(result.scale) },
+      );
+    }
+    const scale = body.scaleResolution
+      ? (applyScaleResolution(result.scale, body.scaleResolution, req.auth!.userId) as unknown as Prisma.InputJsonValue)
+      : undefined;
 
     const updated = await prisma.extractionResult.update({
       where: { id: result.id },
@@ -283,12 +307,16 @@ router.patch(
         ...(body.status ? { status: body.status } : {}),
         ...(body.flagged !== undefined ? { flagged: body.flagged } : {}),
         ...(body.note !== undefined ? { note: body.note } : {}),
+        ...(scale !== undefined ? { scale } : {}),
         reviewedById: req.auth!.userId,
         reviewedAt: new Date(),
       },
     });
     if (body.status === 'VERIFIED') {
       await audit({ workspaceId: result.task.workspaceId, actorId: req.auth!.userId, action: 'extraction.verified', targetType: 'extraction_result', targetId: result.id });
+    }
+    if (body.scaleResolution) {
+      await audit({ workspaceId: result.task.workspaceId, actorId: req.auth!.userId, action: 'extraction.scale_resolved', targetType: 'extraction_result', targetId: result.id, meta: { resolution: body.scaleResolution } });
     }
     res.json({ result: updated });
   }),
@@ -314,8 +342,8 @@ router.post(
       create: { workspaceId: task.workspaceId, name: task.name },
       update: {},
     });
-    const created = await ingestFromExtraction(task.workspaceId, task.id);
-    res.json({ ok: true, entityId: entity.id, created });
+    const { created, refused } = await ingestFromExtraction(task.workspaceId, task.id);
+    res.json({ ok: true, entityId: entity.id, created, refused });
   }),
 );
 

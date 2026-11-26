@@ -3,6 +3,7 @@ import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
 import { sendCovenantBreachEmail } from './mailer';
+import { evaluateCovenant } from './trust';
 
 // Covenant intelligence: extract covenant definitions from credit agreements
 // (grounded in the actual clauses), then test each quarter's observed metrics
@@ -150,7 +151,7 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
 
   const observations = await prisma.metricObservation.findMany({
     where: { entityId },
-    select: { id: true, metricKey: true, period: true, value: true, unit: true, derivation: true },
+    select: { id: true, metricKey: true, period: true, value: true, unit: true, derivation: true, scale: true },
   });
   const byMetric = new Map(
     observations.filter((o) => o.period === targetPeriod).map((o) => [o.metricKey, o]),
@@ -160,22 +161,16 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
   let failed = 0;
   let freshBreaches = 0; // FAIL now but not FAIL before — avoids re-alerting known breaches
   let notTested = 0;
-  const results: { definitionId: string; key: string; label: string; status: string; value: number | null; headroom: number | null }[] = [];
+  const results: { definitionId: string; key: string; label: string; status: string; value: number | null; headroom: number | null; reason: string | null }[] = [];
 
   for (const def of definitions) {
     const obs = byMetric.get(def.metricKey);
 
-    let status: 'PASS' | 'FAIL' | 'NOT_TESTED' = 'NOT_TESTED';
-    let value: number | null = null;
-    let headroom: number | null = null;
-    let observationId: string | null = null;
-
-    if (obs) {
-      value = obs.value;
-      observationId = obs.id;
-      headroom = def.comparator === 'LTE' ? def.threshold - obs.value : obs.value - def.threshold;
-      status = headroom >= 0 ? 'PASS' : 'FAIL';
-    }
+    // TRUST RULE: a covenant whose backing observation carries unresolved
+    // scale flags is NOT_TESTED with a reason — never a PASS or FAIL built
+    // on an untrusted figure (pure logic in services/trust.ts, unit-tested).
+    const { status, value, headroom, reason } = evaluateCovenant(def, obs);
+    const observationId: string | null = obs?.id ?? null;
 
     const previous = await prisma.covenantResult.findFirst({
       where: { definitionId: def.id, period: targetPeriod },
@@ -198,17 +193,19 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
         status,
         headroom,
         observationId,
+        reason,
       },
       update: {
         value,
         status: status === 'NOT_TESTED' && previous?.status === 'WAIVED' ? 'WAIVED' : status,
         headroom,
         observationId,
+        reason,
         computedAt: new Date(),
       },
     });
 
-    results.push({ definitionId: def.id, key: def.key, label: def.label, status, value, headroom });
+    results.push({ definitionId: def.id, key: def.key, label: def.label, status, value, headroom, reason });
   }
 
   // Alert every active member of the workspace — but only on FRESH breaches,

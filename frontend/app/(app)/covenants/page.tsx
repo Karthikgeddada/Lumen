@@ -13,7 +13,7 @@ interface Entity { id: string; name: string; _count: { observations: number; rep
 interface Doc { id: string; name: string; status: string }
 interface CovenantResult {
   id: string; period: string; value: number | null; status: 'PASS' | 'FAIL' | 'NOT_TESTED' | 'WAIVED';
-  headroom: number | null; computedAt: string;
+  headroom: number | null; computedAt: string; reason: string | null;
 }
 interface CovenantDefinition {
   id: string; key: string; label: string; description: string | null;
@@ -128,9 +128,10 @@ export default function Covenants() {
                     <td className="mono" style={{ fontSize: 12.5 }}>{d.metricKey} {cmp} {d.threshold}{d.unit}</td>
                     <td>
                       {l ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                           {statusBadge(l.status)}
                           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.period}: {l.value ?? '—'}{l.headroom != null ? ` · ${l.headroom >= 0 ? '+' : ''}${l.headroom.toFixed(2)}${d.unit} headroom` : ''}</span>
+                          {l.reason ? <span style={{ fontSize: 11.5, color: '#9a6700' }}>⚑ {l.reason}</span> : null}
                         </span>
                       ) : <span style={{ color: 'var(--text-muted)', fontSize: 12.5 }}>Not tested</span>}
                     </td>

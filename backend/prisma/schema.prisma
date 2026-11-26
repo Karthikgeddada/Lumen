@@ -690,6 +690,7 @@ model CovenantResult {
   status       CovenantResultStatus
   headroom     Float?               // signed distance to threshold; positive = compliant
   observationId String?             // MetricObservation backing the value
+  reason       String?              // why NOT_TESTED (e.g. unresolved scale flags on the observation)
   computedAt   DateTime             @default(now())
 
   definition CovenantDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)

@@ -192,6 +192,25 @@ Lower-precedence scales are never stacked on top of higher ones (explicit double
 
 A `Report` model and a `RUN_REPORT` job type exist in the codebase, but there is no real Reports surface yet. Decision pending: build a portfolio report (PDF/Excel export of analytics + covenant status) or remove until needed.
 
+## 11. Trust rule for unit-scale flags (2026-11-26)
+
+**What:** a figure whose unit scale is unresolved (scale not found, conflicting scales) can never silently become a verified number, and can never silently feed a covenant test. Someone must explicitly own the resolution.
+
+**Why:** Lumen's only promise is that every number is correct and traceable to its source. A "4.82" read under a missing "(in thousands)" header is 1,000× wrong — and a covenant PASS built on it would be a lie with a green badge on it.
+
+**How (enforced at every layer, decision logic shared and unit-tested):**
+- Review gate — `PATCH /api/extraction-results/:id` refuses `status: "VERIFIED"` while the result's scale JSON carries unresolved flags, unless the analyst explicitly passes `scaleResolution`:
+  - `{confirm: true}` — "the figure as shown is correct" (existing multiplier, or none, stays), or
+  - `{multiplier: <number>, label?: "thousands"}` — the analyst supplies the correct scale, which replaces the multiplier applied at ingest.
+  The resolution (who, when, chosen multiplier, optional note) is stored inside the scale JSON on the result — the original flags are kept as the audit trail — and the action is audited (`extraction.scale_resolved`).
+- Ingest gate — `ingestFromExtraction` skips any VERIFIED result whose scale is still unresolved (it can never become a `MetricObservation`); the ingest response reports the refused count. Observations created from resolved figures carry the full scale JSON (flags + resolution) as lineage.
+- Covenant gate — a test whose backing observation carries unresolved scale flags stores `NOT_TESTED` with a human-readable `reason` (new nullable `reason` column on `CovenantResult`), visible on the Covenants page, instead of a PASS/FAIL. Missing observations also get a reason now.
+- The pure decision logic (`scaleUnresolved`, `applyScaleResolution`, `evaluateCovenant`) lives in `services/trust.ts` with no I/O, and every path above is covered by `trust.test.ts` (Vitest).
+
+**Limits:** this covers scale flags only — validation flags (sum checks, outlier jumps) join in the next phase. It is deliberately not retroactive-computing: observations ingested before 2026-11-26 with unresolved flags are protected at covenant-test time (NOT_TESTED with reason); re-verifying the underlying extraction remains an explicit analyst action. Existing PASS/FAIL covenant results are never rewritten; a re-run may legitimately flip a previously-tested covenant to NOT_TESTED if its figure is unresolved.
+
+**Status: LIVE.**
+
 ---
 
 ## Pipeline technology (open-source per task)

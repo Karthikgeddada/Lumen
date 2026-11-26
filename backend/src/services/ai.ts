@@ -13,16 +13,33 @@ export function aiUnavailableMessage(): string {
   return 'The AI provider is not configured on this deployment. Set AI_PROVIDER_API_KEY (and optionally AI_BASE_URL / AI_CHAT_MODEL) on the backend to enable AI features.';
 }
 
+// Every provider call is time-capped (default 60 s, AI_TIMEOUT_MS): a hung
+// upstream must never pin a worker. The cap covers connect + response headers;
+// once a chat stream has started, token reads are not capped (known limit).
+function asTimeoutError(err: unknown): Error | null {
+  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    return new Error(
+      `AI provider timed out after ${Math.round(config.ai.timeoutMs / 1000)}s — the request to ${config.ai.baseUrl} was aborted.`,
+    );
+  }
+  return null;
+}
+
 async function post(path: string, body: unknown, signal?: AbortSignal) {
-  const res = await fetch(`${config.ai.baseUrl}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.ai.apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${config.ai.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.ai.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: signal ?? AbortSignal.timeout(config.ai.timeoutMs),
+    });
+  } catch (err) {
+    throw asTimeoutError(err) ?? err;
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
     throw new Error(`AI provider error ${res.status}: ${detail.slice(0, 300)}`);
@@ -98,14 +115,20 @@ export async function embed(texts: string[]): Promise<number[][]> {
     return run(input);
   }
   const base = config.ai.embeddingBaseUrl || config.ai.baseUrl;
-  const res = await fetch(`${base}/embeddings`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.ai.apiKey}`,
-    },
-    body: JSON.stringify({ model: config.ai.embeddingModel, input }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/embeddings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.ai.apiKey}`,
+      },
+      body: JSON.stringify({ model: config.ai.embeddingModel, input }),
+      signal: AbortSignal.timeout(config.ai.timeoutMs),
+    });
+  } catch (err) {
+    throw asTimeoutError(err) ?? err;
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
     throw new Error(`AI provider error ${res.status}: ${detail.slice(0, 300)}`);

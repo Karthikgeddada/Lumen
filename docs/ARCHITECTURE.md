@@ -123,6 +123,19 @@ Supabase Storage (current S3 target): bucket `lumen-documents`, region `ap-north
 
 ## 10. Tests & CI (2026-11-26)
 
-- `npm test` (backend) runs Vitest: 58 tests — 25 canonical normalizer cases, 12 mandated scale cases (thousands/millions/billions/"000s"/"$ in 000"/mixed/per-share exception/double-scaling guard/missing scale/conflicting scales/unit-vs-table precedence/ratio exemption), plus pattern and detailed-parse checks. Files: `src/services/normalizer.test.ts`, `src/services/scale.test.ts`.
+- `npm test` (backend) runs Vitest: 83 tests — 25 canonical normalizer cases, 12 mandated scale cases (thousands/millions/billions/"000s"/"$ in 000"/mixed/per-share exception/double-scaling guard/missing scale/conflicting scales/unit-vs-table precedence/ratio exemption), plus pattern and detailed-parse checks, and 25 trust-rule cases (scale-resolution, verification gate, ingest refusal, covenant NOT_TESTED-with-reason). Files: `src/services/normalizer.test.ts`, `src/services/scale.test.ts`, `src/services/trust.test.ts`.
 - `npm run typecheck` (backend) and `npx tsc --noEmit` (frontend) gate both apps.
 - GitHub Actions (`.github/workflows/ci.yml`) runs backend `npm ci → prisma generate → typecheck → test` and frontend `npm ci → tsc --noEmit` on every push and pull request (free tier).
+
+## 11. Trust rule enforcement (services/trust.ts, 2026-11-26)
+
+A figure with unresolved unit-scale flags can never silently flow into a covenant test. Enforcement points, all sharing the pure `scaleUnresolved` / `applyScaleResolution` / `evaluateCovenant` logic in `services/trust.ts`:
+
+- **Review gate** — `PATCH /api/extraction-results/:id` returns 422 `UNRESOLVED_SCALE` if `status: "VERIFIED"` is attempted on a result whose scale JSON has unresolved flags without an explicit `scaleResolution` (confirm-as-shown, or a supplied multiplier). The resolution (who/when/multiplier) is persisted inside the scale JSON and audited as `extraction.scale_resolved`.
+- **Ingest gate** — `ingestFromExtraction` refuses VERIFIED-but-unresolved results (they never become `MetricObservation` rows); its response reports `refused` counts. Ingested observations carry the full scale JSON (flags + resolution) with `unresolved: false`.
+- **Covenant gate** — `runCovenantTests` evaluates via `evaluateCovenant`: an observation with unresolved scale flags yields `NOT_TESTED` with a human-readable `reason` (nullable `reason` column on `CovenantResult`, migration `20261126160000_covenant_result_reason`); a re-run may legitimately flip a previously-tested covenant to `NOT_TESTED` when its figure is unresolved — existing PASS/FAIL rows are never rewritten silently, only re-evaluated.
+- **Legacy rows** — observations ingested before the resolution era (flags, no `resolution`) count as unresolved and are protected at covenant-test time.
+
+**AI call hygiene (2026-11-26):** every AI provider HTTP call (chat, chat-stream connect, embeddings) is aborted after `AI_TIMEOUT_MS` (default 60 s) with a clear error; a hung upstream can no longer pin a worker job. Known limit: once an SSE chat stream has started, token reads are not capped.
+
+**Migration naming (adopted 2026-11-26):** every new migration folder uses a full 14-digit UTC timestamp prefix (`YYYYMMDDHHMMSS_name`, e.g. `20261126160000_covenant_result_reason`), SQL-only, additive columns/tables only, safe to auto-apply via `prisma migrate deploy` on Render boot.

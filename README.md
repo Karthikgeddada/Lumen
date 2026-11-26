@@ -13,7 +13,7 @@ This repository is a production-ready full-stack SaaS: Next.js frontend, Express
 * **Questionnaires** — build in-app or import from Excel, then let AI draft answers with citations and confidence. Workspace-configurable rules decide what requires human review; reviewers approve or reject each answer.
 * **Analytics** — per-entity quarterly metrics with honest derivation labels (Reported / Calculated / AI-inferred). Feed metrics from verified extractions or enter reported figures directly. On-demand and scheduled reports.
 * **Workspaces & Team** — isolated workspaces, five roles (Owner / Admin / Editor / Reviewer / Viewer), email invitations, and an activity log.
-* **Security** — device-scoped sessions with rotating refresh tokens (access tokens in memory only), argon2id password hashing, workspace-scoped authorization on every route, and audit logging.
+* **Security** — device-scoped sessions with rotating refresh tokens (access tokens in memory only), bcryptjs password hashing (bcrypt, cost 12), workspace-scoped authorization on every route, and audit logging.
 
 Demo content from the reference design ships as clearly-labeled demo data — never mixed with real customer data, and demo AI results are marked as sample output, not verified findings.
 
