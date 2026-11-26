@@ -264,6 +264,7 @@ model Document {
   storageKey   String // object-storage key of the original file
   ownerId      String
   isDemo       Boolean        @default(false)
+  tablesUnavailable Boolean   @default(false) // PDF fell back to pdf-parse (sidecar unreachable) — tables/bboxes missing, disclosed in UI
   uploadedAt   DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   processedAt  DateTime?
@@ -312,6 +313,10 @@ model DocumentTable {
   page       Int?
   order      Int
   header     Json?   // column labels
+  pageWidth  Float?  // PDF page geometry (sidecar)
+  pageHeight Float?
+  bbox       Json?   // {x0, top, x1, bottom} of the table on its page
+  contextAbove Json? // ~3 text lines above the table — where "(in thousands)" lives
 
   document Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
   rows     DocumentTableRow[]
@@ -343,6 +348,7 @@ model DocumentChunk {
   embedding   Json?   // float array (re-ranked via cosine when present)
   emb         Unsupported("vector")? // pgvector mirror of embedding, HNSW-indexed — raw SQL only
   tokenEstimate Int
+  regions     Json?   // evidence geometry: PDF {page,bbox}[] | DOCX {paragraph} | XLSX {sheet,range} | TXT {startLine,endLine}
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
@@ -479,7 +485,8 @@ model ExtractionResult {
   confidence   Float        @default(0)
   page         Int?
   sheet        String?
-  cell         String?      // e.g. "B7"
+  cell         String?      // e.g. "B7" or "p3 t1 r5 c2"
+  bbox         Json?        // PDF cell/row bbox for the evidence viewer
   excerpt      String?      @db.Text
   scale        Json?        // unit-scale provenance: {multiplier, label, from, page, tableId, headerText, flags}
   status       ResultStatus  @default(NEEDS_REVIEW)
@@ -599,6 +606,7 @@ model MetricObservation {
   sourcePage        Int?
   sourceExcerpt     String?    @db.Text
   scale             Json?      // unit-scale provenance carried over from the reviewed extraction result
+  inputs            Json?      // CALCULATED lineage: [{key, metricKey, kind, periods, observationIds, value}]
   extractionResultId String?
   createdAt         DateTime   @default(now())
 
@@ -661,6 +669,11 @@ model CovenantDefinition {
   threshold    Float
   unit         String              @default("x") // x | % | USD | days
   period       String              @default("quarter") // quarter | ttm
+  formula      String?             // e.g. "(debt - cash) / ebitda" — null = single-metric covenant, unchanged behavior
+  terms        Json?               // formula inputs: {inputs: [{key, metricKey, kind: flow|stock|ratio}], where?}
+  schedule     Json?               // step-downs: [{effectiveFrom: "Q1 2026", threshold: 3.5}]
+  cure         Json?               // recorded cure events (display only — never auto-applied)
+  nearBreachPct Float?             // e.g. 15 = alert when headroom ≤ 15% of threshold
   sourceExcerpt String?            @db.Text
   sourcePage   Int?
   confidence   Float               @default(0)
@@ -691,6 +704,8 @@ model CovenantResult {
   headroom     Float?               // signed distance to threshold; positive = compliant
   observationId String?             // MetricObservation backing the value
   reason       String?              // why NOT_TESTED (e.g. unresolved scale flags on the observation)
+  nearBreach   Json?                // {withinPct, headroomPct, nearBreachPct} when the definition sets a near-breach band
+  previousStatus CovenantResultStatus? // status before the latest evaluation — NOT_TESTED can mask the last real one
   computedAt   DateTime             @default(now())
 
   definition CovenantDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)

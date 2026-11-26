@@ -123,11 +123,19 @@ Supabase Storage (current S3 target): bucket `lumen-documents`, region `ap-north
 
 ## 10. Tests & CI (2026-11-26)
 
-- `npm test` (backend) runs Vitest: `src/services/normalizer.test.ts` (25 canonical parse cases via `it.each`), `src/services/scale.test.ts` (12 mandated scale cases — thousands/millions/billions/"000s"/"$ in 000"/mixed/per-share exception/double-scaling guard/missing scale/conflicting scales/unit-vs-table precedence/ratio exemption — plus pattern and detailed-parse checks), and `src/services/trust.test.ts` (25 trust-rule cases: scale-resolution, verification gate, ingest refusal, covenant NOT_TESTED-with-reason).
+- `npm test` (backend) runs Vitest: `src/services/normalizer.test.ts` (25 canonical parse cases via `it.each`), `src/services/scale.test.ts` (12 mandated scale cases — thousands/millions/billions/"000s"/"$ in 000"/mixed/per-share exception/double-scaling guard/missing scale/conflicting scales/unit-vs-table precedence/ratio exemption — plus pattern and detailed-parse checks, and Item 0.5 cases: header-only "in thousands" with no unit, unit-vs-header conflict flagged, unit-header agreement clean), and `src/services/trust.test.ts` (25 trust-rule cases: scale-resolution, verification gate, ingest refusal, covenant NOT_TESTED-with-reason; plus Item 0.5 suites: sameNumber/ingestConflict overwrite guard and isFreshBreach freshness).
 - `npm run typecheck` (backend) and `npx tsc --noEmit` (frontend) gate both apps.
-- GitHub Actions (`.github/workflows/ci.yml`) runs backend `npm ci → prisma generate → typecheck → test` and frontend `npm ci → tsc --noEmit` on every push and pull request (free tier).
+- GitHub Actions (`.github/workflows/ci.yml`) runs backend `npm ci → prisma generate → typecheck → test` and frontend `npm ci → tsc --noEmit` on every push (main AND feature branches — nothing merges to main without a green branch run) and every pull request (free tier).
 
-## 11. Trust rule enforcement (services/trust.ts, 2026-11-26)
+## 11. Item 0.5 hygiene (2026-11-26)
+
+- **Ingest overwrite guard** — `ingestFromExtraction` reads the existing observation for (entity, metric, period) before writing: a different value is skipped and returned as a structured conflict (`conflicts[]` in the ingest response); the same value refreshes metadata and now sets `derivation: AI_INFERRED` on update (previously update left a stale REPORTED label on extraction-refreshed figures). Pure comparison logic `sameNumber` (one part in a billion) in `services/trust.ts`.
+- **Covenant `previousStatus`** — each re-evaluation stores what the result was before the run (`20261126093000_covenant_result_previous_status`, additive); fresh-breach alerting uses `isFreshBreach` so FAIL → NOT_TESTED → FAIL does not re-alert a known breach. Shown in the Covenants UI as "· was pass/breach".
+- **Unit-vs-header scale conflicts** — `decideScale` flags a unit that disagrees with a table/page/document header (unit still wins by precedence); the flag routes the figure into the trust-rule resolution gate before verification/ingest.
+- **ADMIN entity deletion** — `DELETE /:workspaceId/analytics/entities/:entityId` (audit-logged `entity.deleted`) removes entity + observations + covenant definitions/results, unlinks (not deletes) scheduled reports — used for cleaning up test entities.
+- **Deploy URLs** — the live API is `lumen-api-ctpy.onrender.com` (Render subdomain `lumen-api` was taken by an unrelated service); DEPLOYMENT.md now carries the real URL.
+
+## 12. Trust rule enforcement (services/trust.ts, 2026-11-26)
 
 A figure with unresolved unit-scale flags can never silently flow into a covenant test. Enforcement points, all sharing the pure `scaleUnresolved` / `applyScaleResolution` / `evaluateCovenant` logic in `services/trust.ts`:
 

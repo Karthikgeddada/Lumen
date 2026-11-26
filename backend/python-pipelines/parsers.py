@@ -14,6 +14,14 @@ Output contract mirrors the Node ParsedDoc shape exactly:
   "tables":   [{"page": int|null, "order": int, "title": str|null, "sheet": str|null, "header": [...]|null,
                 "rows": [{"rowIndex": int, "cells": [str | {"v": str, "ref": str, "f": str}]}]}]
 }
+PDF responses additionally carry geometry (all additive keys, ignored by
+older Node callers):
+  "pages": [{"page": int, "width": float, "height": float, "headerText": str|null,
+             "lines": [{"text": str, "bbox": {"x0","top","x1","bottom"}}]}]
+  tables gain "pageWidth", "pageHeight", "bbox", "contextAbove" (the ~3
+  nearest text lines above the table — where "(in thousands)" lives), and each
+  row gains "bbox" + "cellBboxes" (aligned per-cell rects; null when the
+  detected grid does not align 1:1 with the extracted cells — never guessed).
 """
 
 import io
@@ -42,6 +50,7 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
 
     sections: list[dict[str, Any]] = []
     tables: list[dict[str, Any]] = []
+    pages_out: list[dict[str, Any]] = []
     order = 0
     t_order = 0
     page_count = 0
@@ -72,20 +81,28 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
             sizes_all = [w["size"] for w in all_words]
             body_size = statistics.median(sizes_all) if sizes_all else 0
             words = [w for w in all_words if not in_table(w)]
-            lines: dict[int, list[tuple[float, str, float]]] = {}
+            raw: dict[int, list[tuple[float, float, str, float, float, float]]] = {}
             for w in words:
                 key = round(w["top"] / 3)
-                lines.setdefault(key, []).append((w["x0"], w["text"], w["size"]))
+                raw.setdefault(key, []).append((w["x0"], w["top"], w["text"], w["size"], w["x1"], w["bottom"]))
 
-            page_lines: list[tuple[float, str]] = []  # (approx top, text) — any line, for table titles
-            for key in sorted(lines):
+            # Text lines with bboxes — geometry for the evidence regions,
+            # the section bboxes and the contextAbove scale detection reads.
+            page_lines: list[dict[str, Any]] = []
+            for key in sorted(raw):
                 # Order words by x0 (reading order) — never by their text.
-                ws = sorted(lines[key], key=lambda x: x[0])
-                text = " ".join(t for _, t, _ in ws).strip()
-                max_size = max(s for _, _, s in ws)
+                ws = sorted(raw[key], key=lambda x: x[0])
+                text = " ".join(t for _, _, t, _, _, _ in ws).strip()
                 if not text:
                     continue
                 total_chars += len(text)
+                max_size = max(s for _, _, _, s, _, _ in ws)
+                line = {
+                    "text": text,
+                    "size": max_size,
+                    "bbox": {"x0": min(w[0] for w in ws), "top": min(w[1] for w in ws),
+                             "x1": max(w[4] for w in ws), "bottom": max(w[5] for w in ws)},
+                }
                 is_heading = body_size and max_size >= body_size * 1.15 and len(text) <= 120
                 if is_heading:
                     level = 2 if max_size < body_size * 1.5 else 1
@@ -95,7 +112,7 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
                 else:
                     sections.append({"kind": "PARAGRAPH", "headingPath": list(heading_path),
                                      "page": pno, "order": order, "text": text})
-                page_lines.append((key * 3.0, text))
+                page_lines.append(line)
                 order += 1
 
             for tbl in found:
@@ -115,18 +132,50 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
                 # statement's label sits directly above its table); the last
                 # heading seen on an earlier page; the file name. Never a
                 # heading from below the table.
+                tb = tbl.bbox
+                above = [l for l in page_lines if l["bbox"]["bottom"] <= tb[1]]
                 if title is None:
-                    above = [h for h in page_lines if h[0] <= tbl.bbox[1]]
-                    title = above[-1][1] if above else (heading_path[-1] if heading_path else base_name)
+                    title = above[-1]["text"] if above else (heading_path[-1] if heading_path else base_name)
+                # ~3 nearest lines above the table — where "(in thousands)"
+                # and similar scale headers live.
+                context_above = [l["text"] for l in above[-3:]]
                 header, body = rows[0], rows[1:]
+
+                # Per-cell bboxes from the detected grid, grouped by row top.
+                # Null for rows whose grid does not align 1:1 with the
+                # extracted cells — geometry is reported or absent, never
+                # guessed.
+                grid: dict[float, list[tuple[float, float, float, float]]] = {}
+                for (x0, top, x1, bottom) in tbl.cells:
+                    grid.setdefault(round(top, 1), []).append((x0, top, x1, bottom))
+                tops = sorted(grid)
+                rows_out = []
+                for i, r in enumerate(body):
+                    cell_bboxes = None
+                    gi = i + 1  # grid row 0 corresponds to the header row
+                    if gi < len(tops):
+                        grp = sorted(grid[tops[gi]], key=lambda c: c[0])
+                        if len(grp) == len(r):
+                            cell_bboxes = [{"x0": c[0], "top": c[1], "x1": c[2], "bottom": c[3]} for c in grp]
+                    rows_out.append({"rowIndex": i, "cells": r,
+                                     "bbox": {"x0": tb[0], "top": tb[1], "x1": tb[2], "bottom": tb[3]},
+                                     "cellBboxes": cell_bboxes})
+
                 tables.append({"page": pno, "order": t_order,
                                "title": title,
                                "sheet": None, "header": header,
-                               "rows": [{"rowIndex": i, "cells": r} for i, r in enumerate(body)]})
+                               "pageWidth": float(page.width), "pageHeight": float(page.height),
+                               "bbox": {"x0": tb[0], "top": tb[1], "x1": tb[2], "bottom": tb[3]},
+                               "contextAbove": context_above,
+                               "rows": rows_out})
                 t_order += 1
 
+            pages_out.append({"page": pno, "width": float(page.width), "height": float(page.height),
+                              "headerText": page_lines[0]["text"] if page_lines else None,
+                              "lines": [{"text": l["text"], "bbox": l["bbox"]} for l in page_lines]})
+
     return {"pageCount": page_count, "ocrRequired": total_chars == 0,
-            "sections": sections, "tables": tables}
+            "sections": sections, "tables": tables, "pages": pages_out}
 
 
 # ── DOCX ───────────────────────────────────────────────────────────────

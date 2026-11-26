@@ -54,6 +54,18 @@ export const config = {
     secretKey: process.env.STORAGE_SECRET_KEY || '',
   },
 
+  parse: {
+    // Python parser wiring (read directly by services/pipelineClient.ts):
+    // PDF/DOCX/XLSX/CSV parse in-process by default — the worker spawns
+    // python-pipelines/parse_once.py (LUMEN_PYTHON_BIN; on Render the
+    // build-time venv). PARSE_SERVICE_URL is the optional escape hatch that
+    // routes to a remote sidecar instead; on any Python failure the JS
+    // parsers run and the document is honestly marked tablesUnavailable —
+    // never a silent quality drop.
+    serviceUrl: process.env.PARSE_SERVICE_URL || '',
+    token: process.env.PIPELINES_TOKEN || '',
+  },
+
   maxUploadBytes: num(process.env.MAX_UPLOAD_MB, 500) * 1024 * 1024,
 
   // Access token: short-lived, kept in memory on the client.

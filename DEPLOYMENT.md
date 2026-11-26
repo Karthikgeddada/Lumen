@@ -32,7 +32,7 @@ The stack: the Next.js app deploys on **Vercel**; the backend (API + background 
    * `AI_EMBEDDING_BASE_URL=local` + `AI_EMBEDDING_MODEL=Xenova/all-MiniLM-L6-v2` — open-source embeddings **running in-process**, free, no API needed (OpenRouter has no embeddings endpoint; the model downloads on first use, ~25 MB, and semantic retrieval just works)
    * `STORAGE_*` — only needed before real uploads (§4)
 4. **Create Web Service**. The build runs, migrations apply automatically in the start command (the Neon baseline is already in the repo), and `scripts/start-all.js` starts the API **and** the background worker as one process tree.
-5. Verify `https://lumen-api.onrender.com/api/health` returns `{ ok: true }`.
+5. Verify `https://lumen-api-ctpy.onrender.com/api/health` returns `{"status": "ok"}` (your Render URL will differ — copy it from the service page; `lumen-api` itself was already taken on onrender.com, hence the `-ctpy` suffix).
 6. Seed once (built-in templates + demo dataset; idempotent per database): open the service's **Shell** tab and run `npx prisma db seed` — or run it locally with `DIRECT_URL` as `DATABASE_URL`.
 
 **Free-tier behavior:** the service sleeps after ~15 min of inactivity — the first request then takes ~30–60 s while it wakes (the Assistant's first message after idle may need one retry), and background processing pauses while asleep. Free instances get 750 hrs/month — exactly enough for this one service. If the sleep/wake cycle is disruptive, an external uptime pinger (e.g. cron-job.org) hitting `/api/health` every 10 min keeps it warm, still within the free hours.
@@ -40,7 +40,7 @@ The stack: the Next.js app deploys on **Vercel**; the backend (API + background 
 ## 3. Frontend — Vercel
 
 1. On vercel.com, **Add New → Project**, import `Karthikgeddada/Lumen`. Vercel auto-detects Next.js; set the **Root Directory** to `frontend`.
-2. Environment variable: `NEXT_PUBLIC_API_URL` = `https://lumen-api.onrender.com` (the Render URL, no trailing slash).
+2. Environment variable: `NEXT_PUBLIC_API_URL` = `https://lumen-api-ctpy.onrender.com` (the Render URL, no trailing slash — the live deployment for this repo).
 3. Deploy. Then set the Render service's `FRONTEND_URL` / `ALLOWED_ORIGINS` to the production Vercel URL so CORS, invitation links, and password-reset links point to the right origin.
 
 Cross-site auth: the frontend (vercel.app) and API (onrender.com) are different sites — the API client keeps the access token in memory and falls back to a localStorage refresh token when a browser blocks the API's httpOnly cross-site cookie, so sign-in works either way.

@@ -1,0 +1,45 @@
+# Non-obvious decisions — phase/accuracy-evidence
+
+Format: **What** · Why · Alternatives considered. Append-only per item.
+
+> **Update (2026-11-27, merged to main):** section B's sidecar-first design was
+> superseded by the **single-service architecture**: the Python parsers now
+> run in-process inside lumen-api — the worker spawns
+> `backend/python-pipelines/parse_once.py` per document (`LUMEN_PYTHON_BIN`,
+> timeout `PARSE_TIMEOUT_MS`, off switch `LUMEN_PYTHON_PARSERS=false`).
+> `PARSE_SERVICE_URL` remains only as an escape hatch to a remote sidecar
+> (takes precedence when set). Everything else in B — geometry, refs,
+> `tablesUnavailable` disclosure, fallback honesty — is unchanged; the strict
+> contract mapper in `services/pipelineClient.ts` serves both paths.
+
+## A. Close-outs
+
+- **README "wrong URL" — no fix needed.** README.md contains no backend URL at all (verified by grep for `https://`, `onrender`, `lumen-api`: zero matches), so the only wrong-URL instance was DEPLOYMENT.md, now corrected to `lumen-api-ctpy.onrender.com`. · The directive assumed both files carried the stranger's URL; only DEPLOYMENT.md did.
+- **Credentialed requests to `lumen-api.onrender.com` (a stranger's service): cannot be ruled out from the repo.** DEPLOYMENT.md recommended the wrong URL from 2026-11-22 until this fix; if any browser deployed the frontend against it during that window, its in-memory access token (Bearer) and possibly a refresh-token cookie would have been sent to that host. · No evidence in logs/repo that this happened, and access tokens are short-lived and kept in memory, so exposure is likely low. · **User action recommended:** if you ever set `NEXT_PUBLIC_API_URL=https://lumen-api.onrender.com`, sign out everywhere (clears cookies/localStorage) and rotate your password.
+- **Deleting "ITEM0 SCALE PROOF" from production is a manual step, not automated.** The ADMIN-only, workspace-scoped, audit-logged endpoint `DELETE /api/workspaces/:wid/analytics/entities/:entityId` exists for exactly this, but the production Neon DB is not reachable from the build environment (by design — no prod credentials, no prod probing). · Alternative (rejected): hardcoding a one-off cleanup in a migration — that would run against every environment and rewrite data non-idempotently. · Steps for the user are in docs/MANUAL_TEST.md.
+- **Ingest conflicts (A2) are reported, not blocking.** `ingestFromExtraction` skips a differing existing figure and returns it in `conflicts[]`; non-conflicting figures still ingest. · Alternative (rejected): aborting the whole ingest on first conflict — one bad re-extraction would then hide all good figures.
+- **`sameNumber` tolerance is one part in a billion**, not exact equality. · Two parse paths (normalizer vs unit-applied) can differ in the last float bits; a strict `===` would report false conflicts for the same figure.
+- **`previousStatus` records the pre-run status of the same row, not a history table.** · Enough for the mandated alert rule (FAIL→NOT_TESTED→FAIL is not fresh) and the UI hint; a full audit trail of covenant changes is future work.
+
+## B. PDF tables & regions (Python sidecar)
+
+- **PDF only goes to the sidecar; DOCX/XLSX/CSV stay on Node parsers.** · The directive's geometry (per-cell bboxes, page lines) only exists for PDF; routing every format would add a network dependency (and a 90 s worst-case) to paths that already work locally. · Alternative (rejected): sending all formats through the sidecar — one more moving part for zero new fidelity.
+- **Per-cell bboxes are honest, not guessed: `cellBboxes` is null when the pdfplumber grid doesn't align 1:1 with extracted cells** (merged/empty rows). · The evidence viewer's fallback chain handles null gracefully; a fabricated rectangle would undermine the trust rule.
+- **Cell ref convention is `p{page} t{table order} r{row index} c{col index}` (0-based t/r/c, exactly the stored DocumentTableRow index).** · Round-trips losslessly to persisted rows; the example "p3 t1 r5 c2" reads naturally in the UI. · Alternative (rejected): 1-based everywhere — off-by-one divergence between chunk-text refs and DB rows.
+- **Retry budget is one, timeout 90 s per attempt.** · Free-tier sidecars sleep; one retry covers a cold start. · More retries would stack worst-case latency on the worker (2×90 s) for diminishing returns.
+- **`tablesUnavailable` is a disclosed state, not an error.** · The document still processes via pdf-parse (headings/paragraph text work); the flag surfaces on the document page and as a note on every extraction result of that document. · Alternative (rejected): failing the document — prose extraction is still useful, and hard-failing would make the sidecar a single point of failure for uploads.
+- **PDF section bboxes are matched by normalized text equality against the sidecar's page lines** (both derive from the same words). · Unmatched sections carry no bbox — the viewer falls back to text search, never a fabricated highlight.
+- **Python tests generate fixtures in-memory (reportlab/python-docx/openpyxl); no binary files in git.** · Keeps the repo text-only and fixtures auditable; reportlab is BSD-licensed (free-OSS constraint respected).
+
+## C. Validation, formulas, TTM, calculated metrics
+
+- **The formula engine is a mathjs AST walker, not `evaluate()` — every node type, operator and function is whitelist-checked before evaluation, and a FunctionNode's `fn` child is skipped during traversal** (it is the function name, not a variable; mathjs ≥13 stores it as a plain string, older versions as a SymbolNode — both handled). · Injection tests cover assignment, imports, non-whitelisted operators (`==`, `?:`, `and`), matrix/object escapes and block smuggling. · Limits: ≤500 chars, ≤100 nodes, ≤20 calls, finite results only. · Alternative (rejected): sandboxed `evaluate` with a restricted scope — the node whitelist is the actual security boundary.
+- **`null` formula keeps the single-metric code path byte-for-byte unchanged; a formula covenant requires terms with unique input keys, cross-field validated at the API (400 INVALID_FORMULA, never a runtime error later).**
+- **TTM is kind-aware and gap-intolerant: flow inputs sum the 4 consecutive quarters ending at the target (a gap → NOT_TESTED naming the missing quarter — never a partial-year sum); stock and ratio inputs use the period-end value; annual target periods cannot be TTM-ed.** · A ratio is never averaged across quarters — averages of ratios are meaningless.
+- **Step-down schedules are boundary-inclusive: the latest step whose `effectiveFrom` ≤ the target period applies; unparseable steps are ignored, the base threshold stands.**
+- **Near-breach is a % headroom band on PASS results only (breaches alert as breaches); `nearBreachPct: null` disables it entirely — a covenant with no band set behaves exactly as before.** · Alerts fire on fresh events only (existing rule), no re-alert on recomputes.
+- **Trust propagates through formulas: if any input observation in the TTM window carries an unresolved scale flag, the covenant is NOT_TESTED with the quarter and flag named.** · A calculated metric inherits its inputs' trust state rather than papering over it.
+- **Cures are display-only context (who/when/note/period on the definition), never auto-applied to a covenant result.** · A FAIL with a recorded cure still reads FAIL — waiver decisions stay human.
+- **The validation core (`validation.ts`) is pure — no prisma/config import — so unit tests run without DATABASE_URL; DB orchestration lives in `validationRun.ts`, hooked after scale enrichment with a catch-and-warn (validation never blocks extraction).** · Alternative (rejected): mocking prisma in tests — import-time env failure in `config.ts` can't be mocked away cleanly.
+- **QoQ outlier check is OFF until configured (growth is real); component sums default to 0.5% tolerance; every validation miss lands as a note + `flagged` on the result so the existing trust rule forces human ownership.**
+- **Validation rules are a per-workspace WorkspaceSetting (`validation.rules`), editable by EDITORs on the Settings page; the runner reads them at extraction time.**

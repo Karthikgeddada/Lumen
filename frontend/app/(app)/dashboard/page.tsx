@@ -16,7 +16,7 @@ import {
 interface CovenantBoardItem {
   id: string; label: string; entityName: string;
   comparator: 'LTE' | 'GTE'; threshold: number; unit: string; needsReview: boolean;
-  latest: { period: string; status: 'PASS' | 'FAIL' | 'NOT_TESTED' | 'WAIVED'; value: number | null; headroom: number | null } | null;
+  latest: { period: string; status: 'PASS' | 'FAIL' | 'NOT_TESTED' | 'WAIVED'; value: number | null; headroom: number | null; previousStatus: 'PASS' | 'FAIL' | 'NOT_TESTED' | 'WAIVED' | null } | null;
 }
 interface DashboardData {
   kpis: {
@@ -144,6 +144,8 @@ export default function Dashboard() {
                             {c.latest.period}{c.latest.headroom != null
                               ? ` · ${c.latest.headroom >= 0 ? '+' : ''}${Math.abs(c.latest.headroom) < 10 ? c.latest.headroom.toFixed(2) : `${(c.latest.headroom / 1_000_000).toFixed(1)}M`}${c.unit} headroom`
                               : ''}
+                            {c.latest.status === 'NOT_TESTED' && c.latest.previousStatus && c.latest.previousStatus !== 'NOT_TESTED'
+                              ? ` · was ${c.latest.previousStatus.toLowerCase()}` : ''}
                           </div>
                         </div>
                       ) : (

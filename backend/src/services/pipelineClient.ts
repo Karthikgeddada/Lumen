@@ -21,7 +21,7 @@
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import path from 'path';
-import type { ParsedCell, ParsedDoc, ParsedSection, ParsedTable } from './parsers';
+import type { ParsedCell, ParsedDoc, ParsedSection, ParsedTable, PdfPageInfo } from './parsers';
 
 export interface SidecarEnv {
   url: string;
@@ -114,6 +114,13 @@ export function parseViaLocalPython(env: LocalPythonEnv, filePath: string, name:
 
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isBbox = (v: unknown): v is { x0: number; top: number; x1: number; bottom: number } =>
+  typeof v === 'object' &&
+  v !== null &&
+  isNum((v as Record<string, unknown>).x0) &&
+  isNum((v as Record<string, unknown>).top) &&
+  isNum((v as Record<string, unknown>).x1) &&
+  isNum((v as Record<string, unknown>).bottom);
 
 function mapCell(raw: unknown): string | ParsedCell | null {
   if (raw == null) return '';
@@ -148,17 +155,53 @@ function mapSection(raw: unknown): ParsedSection | null {
   };
 }
 
-function mapRow(raw: unknown): { rowIndex: number; cells: (string | ParsedCell)[] } | null {
+function mapRow(
+  raw: unknown,
+  pdf?: { page: number | null; order: number },
+): { rowIndex: number; cells: (string | ParsedCell)[]; bbox?: { x0: number; top: number; x1: number; bottom: number } } | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const r = raw as Record<string, unknown>;
   if (!Array.isArray(r.cells)) return null;
+  if (r.bbox != null && !isBbox(r.bbox)) return null;
+  const rowBbox = isBbox(r.bbox) ? r.bbox : undefined;
+  // Per-cell bboxes from the detected PDF grid — null entries allowed (the
+  // grid did not align 1:1 for that row — never guessed).
+  let cellBboxes: ({ x0: number; top: number; x1: number; bottom: number } | null)[] | undefined;
+  if (r.cellBboxes != null) {
+    if (!Array.isArray(r.cellBboxes)) return null;
+    cellBboxes = [];
+    for (const cb of r.cellBboxes) {
+      if (cb == null) cellBboxes.push(null);
+      else if (isBbox(cb)) cellBboxes.push(cb);
+      else return null;
+    }
+  }
+  const rowIndex = isNum(r.rowIndex) ? r.rowIndex : 0;
   const cells: (string | ParsedCell)[] = [];
-  for (const c of r.cells) {
+  for (let i = 0; i < r.cells.length; i++) {
+    const c = r.cells[i];
+    if (typeof c === 'string' || c == null) {
+      cells.push(c == null ? '' : c);
+      continue;
+    }
     const m = mapCell(c);
     if (m === null) return null;
-    cells.push(m);
+    if (!pdf) {
+      cells.push(m);
+      continue;
+    }
+    // PDF table cell: give it an honest page/table/row/col ref + its bbox
+    // from the detected grid — refs like "p3 t1 r5 c2" are what citations
+    // and evidence use.
+    const bbox = cellBboxes?.[i] ?? rowBbox;
+    const genRef = `p${pdf.page ?? 0} t${pdf.order} r${rowIndex} c${i}`;
+    if (typeof m === 'string') {
+      cells.push({ v: m, ref: genRef, ...(bbox ? { bbox } : {}) });
+    } else {
+      cells.push(m.ref ? { ...m, ...(bbox ? { bbox } : {}) } : { ...m, ref: genRef, ...(bbox ? { bbox } : {}) });
+    }
   }
-  return { rowIndex: isNum(r.rowIndex) ? r.rowIndex : 0, cells };
+  return { rowIndex, cells, ...(rowBbox ? { bbox: rowBbox } : {}) };
 }
 
 function mapTable(raw: unknown): ParsedTable | null {
@@ -167,6 +210,11 @@ function mapTable(raw: unknown): ParsedTable | null {
   if (!Array.isArray(t.rows)) return null;
   if (t.order !== undefined && !isNum(t.order)) return null;
   if (t.page !== undefined && t.page !== null && !isNum(t.page)) return null;
+  // Geometry (PDF tables from pdfplumber) — strictly validated, optional.
+  if (t.pageWidth !== undefined && t.pageWidth !== null && !isNum(t.pageWidth)) return null;
+  if (t.pageHeight !== undefined && t.pageHeight !== null && !isNum(t.pageHeight)) return null;
+  if (t.bbox != null && !isBbox(t.bbox)) return null;
+  if (t.contextAbove != null && (!Array.isArray(t.contextAbove) || !t.contextAbove.every(isStr))) return null;
 
   let header: (string | ParsedCell)[] | null = null;
   if (t.header != null) {
@@ -179,9 +227,15 @@ function mapTable(raw: unknown): ParsedTable | null {
     }
   }
 
-  const rows: { rowIndex: number; cells: (string | ParsedCell)[] }[] = [];
+  // A table with a bbox is a pdfplumber-detected PDF table — that context
+  // is what gives its cells refs + bboxes in mapRow.
+  const pdfTable = isBbox(t.bbox)
+    ? { page: t.page == null ? null : (t.page as number), order: isNum(t.order) ? t.order : 0 }
+    : undefined;
+
+  const rows: { rowIndex: number; cells: (string | ParsedCell)[]; bbox?: { x0: number; top: number; x1: number; bottom: number } }[] = [];
   for (const r of t.rows) {
-    const m = mapRow(r);
+    const m = mapRow(r, pdfTable);
     if (m === null) return null;
     rows.push(m);
   }
@@ -193,10 +247,14 @@ function mapTable(raw: unknown): ParsedTable | null {
     order: isNum(t.order) ? t.order : 0,
     header,
     rows,
+    ...(isNum(t.pageWidth) ? { pageWidth: t.pageWidth as number } : {}),
+    ...(isNum(t.pageHeight) ? { pageHeight: t.pageHeight as number } : {}),
+    ...(isBbox(t.bbox) ? { bbox: t.bbox } : {}),
+    ...(Array.isArray(t.contextAbove) ? { contextAbove: (t.contextAbove as unknown[]).filter(isStr) as string[] } : {}),
   };
 }
 
-/** Map a sidecar /parse response to ParsedDoc, or null if it violates the contract. */
+/** Map a Python /parse response to ParsedDoc, or null if it violates the contract. */
 export function mapSidecarResponse(raw: unknown): ParsedDoc | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
@@ -216,11 +274,53 @@ export function mapSidecarResponse(raw: unknown): ParsedDoc | null {
     if (m === null) return null;
     tables.push(m);
   }
+
+  // PDF geometry: per-page text lines with bboxes (absent for docx/xlsx/csv).
+  const pdfPages: PdfPageInfo[] = [];
+  if (o.pages != null) {
+    if (!Array.isArray(o.pages)) return null;
+    for (const p of o.pages) {
+      if (typeof p !== 'object' || p === null) return null;
+      const po = p as Record<string, unknown>;
+      if (!isNum(po.page) || !isNum(po.width) || !isNum(po.height)) return null;
+      if (po.headerText !== undefined && po.headerText !== null && !isStr(po.headerText)) return null;
+      if (!Array.isArray(po.lines)) return null;
+      const lines: { text: string; bbox: { x0: number; top: number; x1: number; bottom: number } }[] = [];
+      for (const l of po.lines) {
+        if (typeof l !== 'object' || l === null) return null;
+        const lo = l as Record<string, unknown>;
+        if (!isStr(lo.text) || !isBbox(lo.bbox)) return null;
+        lines.push({ text: lo.text, bbox: lo.bbox });
+      }
+      pdfPages.push({
+        page: po.page as number,
+        width: po.width as number,
+        height: po.height as number,
+        headerText: isStr(po.headerText) ? po.headerText : null,
+        lines,
+      });
+    }
+  }
+
+  // Attach line bboxes to sections by matching normalized text on the page —
+  // the Python parser builds sections and lines from the same words, so an
+  // exact match is expected; unmatched sections simply carry no bbox (the
+  // viewer then falls back to text search — never a fabricated highlight).
+  if (pdfPages.length) {
+    const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+    for (const s of sections) {
+      const page = pdfPages.find((p) => p.page === s.page);
+      const line = page?.lines.find((l) => norm(l.text) === norm(s.text));
+      if (line) s.bbox = line.bbox;
+    }
+  }
+
   return {
     pageCount: o.pageCount == null ? null : (o.pageCount as number),
     ocrRequired: o.ocrRequired,
     sections,
     tables,
+    ...(pdfPages.length ? { pdfPages } : {}),
   };
 }
 
