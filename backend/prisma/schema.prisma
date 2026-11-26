@@ -503,6 +503,7 @@ model Questionnaire {
   description String?
   status      String   @default("in_progress") // draft | in_progress | completed
   source      String   @default("custom")      // custom | imported
+  documentIds String[] @default([])           // data-room docs the AI may answer from
   createdById String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

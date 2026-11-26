@@ -27,11 +27,16 @@ export default function Questionnaires() {
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [docIds, setDocIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   const { data, isLoading, mutate } = useSWR(
     wid ? `q-${wid}` : null,
     () => api<{ questionnaires: Q[] }>(`/api/workspaces/${wid}/questionnaires`),
+  );
+  const { data: docData } = useSWR(
+    wid ? `qdocs-${wid}` : null,
+    () => api<{ documents: { id: string; name: string; status: string }[] }>(`/api/workspaces/${wid}/documents?status=COMPLETED&take=200`),
   );
 
   async function create(e: React.FormEvent) {
@@ -39,10 +44,10 @@ export default function Questionnaires() {
     setBusy(true);
     try {
       const res = await api<{ questionnaire: { id: string } }>(`/api/workspaces/${wid}/questionnaires`, {
-        method: 'POST', body: { title, description },
+        method: 'POST', body: { title, description, documentIds: docIds },
       });
       setCreateOpen(false);
-      setTitle(''); setDescription('');
+      setTitle(''); setDescription(''); setDocIds([]);
       window.location.href = `/questionnaires/${res.questionnaire.id}`;
     } finally {
       setBusy(false);
@@ -129,6 +134,19 @@ export default function Questionnaires() {
           <Field label="Description (optional)">
             <textarea className="textarea" maxLength={400} value={description} onChange={(e) => setDescription(e.target.value)}
               placeholder="What this questionnaire is for" />
+          </Field>
+          <Field label="Answer from (optional)" hint="Pick data-room documents the AI may answer from — none selected means all workspace documents.">
+            <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: 4 }}>
+              {(docData?.documents ?? []).length === 0 ? (
+                <div style={{ padding: 8, fontSize: 12.5, color: 'var(--text-muted)' }}>No processed documents yet — upload some in the Data Room.</div>
+              ) : docData!.documents.map((d) => (
+                <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', fontSize: 13, borderRadius: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={docIds.includes(d.id)} onChange={(e) =>
+                    setDocIds(e.target.checked ? [...docIds, d.id] : docIds.filter((x) => x !== d.id))} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                </label>
+              ))}
+            </div>
           </Field>
           <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
             After creating, you can import questions from Excel or add them manually.

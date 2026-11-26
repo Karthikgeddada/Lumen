@@ -90,9 +90,13 @@ export async function draftQuestionnaire(questionnaireId: string): Promise<void>
     // Skip questions a reviewer has already approved or rejected.
     if (question.answer && ['APPROVED', 'REJECTED'].includes(question.answer.status)) continue;
 
+    // Answer only from the documents this questionnaire is scoped to
+    // (picked from the data room); empty scope = all workspace documents.
+    const docIds = (q.documentIds as string[] | null) ?? [];
+    const scope = docIds.length ? { documentIds: docIds } : {};
     const chunks: RetrievedChunk[] = await retrieve(
       q.workspaceId,
-      {},
+      scope,
       question.prompt,
       5,
     );

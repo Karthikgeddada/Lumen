@@ -81,13 +81,24 @@ router.post(
       .object({
         title: z.string().trim().min(1).max(140),
         description: z.string().trim().max(400).optional(),
+        documentIds: z.array(z.string()).max(50).optional(),
       })
-      .parse(req.body);
+      .parse(req.body ?? {});
+    // The scope can only reference documents this workspace can see.
+    const validIds = body.documentIds?.length
+      ? (
+          await prisma.document.findMany({
+            where: { id: { in: body.documentIds }, workspaceId: req.ws!.id, deletedAt: null },
+            select: { id: true },
+          })
+        ).map((d) => d.id)
+      : [];
     const questionnaire = await prisma.questionnaire.create({
       data: {
         workspaceId: req.ws!.id,
         title: body.title,
         description: body.description,
+        documentIds: validIds,
         createdById: req.auth!.userId,
       },
     });
@@ -124,15 +135,31 @@ router.patch(
   '/questionnaires/:questionnaireId',
   requireAuth,
   asyncH(async (req, res) => {
-    await requireQAccess(req, req.params.questionnaireId, 'EDITOR');
+    const { workspaceId } = await requireQAccess(req, req.params.questionnaireId, 'EDITOR');
     const body = z
       .object({
         title: z.string().trim().min(1).max(140).optional(),
         description: z.string().trim().max(400).optional(),
         status: z.enum(['draft', 'in_progress', 'completed']).optional(),
+        documentIds: z.array(z.string()).max(50).optional(),
       })
-      .parse(req.body);
-    const questionnaire = await prisma.questionnaire.update({ where: { id: req.params.questionnaireId }, data: body });
+      .parse(req.body ?? {});
+    const data: { title?: string; description?: string; status?: string; documentIds?: string[] } = {};
+    if (body.title !== undefined) data.title = body.title;
+    if (body.description !== undefined) data.description = body.description;
+    if (body.status !== undefined) data.status = body.status;
+    if (body.documentIds !== undefined) {
+      // The scope can only reference documents this workspace can see.
+      data.documentIds = body.documentIds.length
+        ? (
+            await prisma.document.findMany({
+              where: { id: { in: body.documentIds }, workspaceId, deletedAt: null },
+              select: { id: true },
+            })
+          ).map((d) => d.id)
+        : [];
+    }
+    const questionnaire = await prisma.questionnaire.update({ where: { id: req.params.questionnaireId }, data });
     res.json({ questionnaire });
   }),
 );

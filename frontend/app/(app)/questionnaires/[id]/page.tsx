@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import useSWR from 'swr';
 import {
-  ArrowLeft, Plus, Upload, Download, Sparkles, Trash2, Check, X, AlertTriangle, FileSpreadsheet,
+  ArrowLeft, Plus, Upload, Download, Sparkles, Trash2, Check, X, AlertTriangle, FileSpreadsheet, Library,
 } from 'lucide-react';
 import { api, API_BASE } from '../../../../lib/api';
 import { useWorkspace } from '../../../../lib/workspace';
@@ -24,7 +24,7 @@ interface Question {
   answer: Answer | null;
 }
 interface QDetail {
-  questionnaire: { id: string; title: string; description: string | null; status: string; source: string };
+  questionnaire: { id: string; title: string; description: string | null; status: string; source: string; documentIds: string[] | null };
   questions: Question[];
   rules: { requireCitations: boolean; lowConfidenceThreshold: number; autoApproveHighConfidence: boolean };
 }
@@ -39,10 +39,12 @@ const ANSWER_STATUS: Record<string, { label: string; cls: string }> = {
 
 export default function QuestionnaireDetail() {
   const { id } = useParams<{ id: string }>();
-  const { can } = useWorkspace();
+  const { can, workspace } = useWorkspace();
 
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [scopeIds, setScopeIds] = useState<string[]>([]);
   const [evidence, setEvidence] = useState<Answer['evidence'][number] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafting, setDrafting] = useState(false);
@@ -51,6 +53,11 @@ export default function QuestionnaireDetail() {
   const { data, isLoading, mutate } = useSWR(id, (qid: string) => api<QDetail>(`/api/questionnaires/${qid}`), {
     refreshInterval: 15000,
   });
+  const wsId = workspace?.workspace.id;
+  const { data: docData } = useSWR(
+    wsId ? `qscopedocs-${id}` : null,
+    () => api<{ documents: { id: string; name: string; status: string }[] }>(`/api/workspaces/${wsId}/documents?status=COMPLETED&take=200`),
+  );
   const q = data?.questionnaire;
   const questions = data?.questions ?? [];
   const sections = Array.from(new Set(questions.map((x) => x.section)));
@@ -65,6 +72,17 @@ export default function QuestionnaireDetail() {
     } finally {
       setDrafting(false);
     }
+  }
+
+  async function saveScope(next: string[]) {
+    setScopeIds(next);
+    try {
+      await api(`/api/questionnaires/${id}`, { method: 'PATCH', body: { documentIds: next } });
+      mutate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update scope.');
+    }
+    setScopeOpen(false);
   }
 
   async function review(answerId: string, status: string, finalAnswer?: string) {
@@ -93,6 +111,8 @@ export default function QuestionnaireDetail() {
             {data?.rules?.lowConfidenceThreshold
               ? ` · answers under ${Math.round(data.rules.lowConfidenceThreshold * 100)}% confidence require review`
               : ''}
+            {' · answering from '}
+            {(q.documentIds?.length ?? 0) > 0 ? `${q.documentIds!.length} selected document${q.documentIds!.length === 1 ? '' : 's'}` : 'all workspace documents'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -101,6 +121,9 @@ export default function QuestionnaireDetail() {
           </a>
           {can('EDITOR') ? (
             <>
+              <button className="btn btn-secondary" onClick={() => { setScopeIds(q.documentIds ?? []); setScopeOpen(true); }} title="Choose which data-room documents the AI may answer from">
+                <Library size={14} /> Scope
+              </button>
               <button className="btn btn-secondary" onClick={() => setImportOpen(true)}><Upload size={14} /> Import Excel</button>
               <button className="btn btn-secondary" onClick={() => setAddOpen(true)}><Plus size={14} /> Add question</button>
               <button className="btn btn-primary" onClick={draft} disabled={drafting}>
@@ -244,6 +267,28 @@ export default function QuestionnaireDetail() {
             </div>
           </>
         ) : null}
+      </Modal>
+
+      {/* Scope modal — which data-room documents the AI may answer from */}
+      <Modal open={scopeOpen} onClose={() => setScopeOpen(false)} title="Answer from" width={480}>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+          Choose which documents the AI may draft answers from. None selected means all workspace documents. Only this workspace's documents are ever reachable.
+        </div>
+        <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', padding: 4 }}>
+          {(docData?.documents ?? []).length === 0 ? (
+            <div style={{ padding: 10, fontSize: 12.5, color: 'var(--text-muted)' }}>No processed documents yet — upload some in the Data Room.</div>
+          ) : docData!.documents.map((d) => (
+            <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', fontSize: 13, borderRadius: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={scopeIds.includes(d.id)} onChange={(e) =>
+                setScopeIds(e.target.checked ? [...scopeIds, d.id] : scopeIds.filter((x) => x !== d.id))} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+          <button className="btn btn-secondary" onClick={() => saveScope([])}>All workspace documents</button>
+          <button className="btn btn-primary" onClick={() => saveScope(scopeIds)}><Library size={14} /> Save scope</button>
+        </div>
       </Modal>
     </main>
   );
