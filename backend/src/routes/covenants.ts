@@ -79,6 +79,9 @@ router.post(
       data: { ...body, workspaceId: req.ws!.id, status: 'REVIEWED', createdById: req.auth!.userId },
       include: { entity: { select: { id: true, name: true } }, results: true },
     });
+    // Immediate test: a freshly defined covenant is evaluated against the
+    // entity's latest observed numbers right away (no manual run needed).
+    void runCovenantTests(req.ws!.id, entity.id).catch(() => {});
     await audit({ workspaceId: req.ws!.id, actorId: req.auth!.userId, action: 'covenant.created', targetType: 'covenant', targetId: definition.id });
     res.status(201).json({ definition });
   }),
@@ -170,6 +173,9 @@ router.patch(
       },
       include: { entity: { select: { id: true, name: true } }, results: { orderBy: { computedAt: 'desc' } } },
     });
+    // A changed test (or a definition approved after AI proposal) is re-evaluated
+    // against the latest numbers immediately.
+    void runCovenantTests(definition.workspaceId, definition.entityId).catch(() => {});
     await audit({ workspaceId: definition.workspaceId, actorId: req.auth!.userId, action: 'covenant.reviewed', targetType: 'covenant', targetId: definition.id });
     res.json({ definition: updated });
   }),

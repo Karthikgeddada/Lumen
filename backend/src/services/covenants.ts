@@ -157,6 +157,7 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
 
   let passed = 0;
   let failed = 0;
+  let freshBreaches = 0; // FAIL now but not FAIL before — avoids re-alerting known breaches
   let notTested = 0;
   const results: { definitionId: string; key: string; label: string; status: string; value: number | null; headroom: number | null }[] = [];
 
@@ -175,14 +176,17 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
       status = headroom >= 0 ? 'PASS' : 'FAIL';
     }
 
-    if (status === 'PASS') passed++;
-    else if (status === 'FAIL') failed++;
-    else notTested++;
-
     const previous = await prisma.covenantResult.findFirst({
       where: { definitionId: def.id, period: targetPeriod },
       select: { id: true, status: true },
     });
+
+    if (status === 'PASS') passed++;
+    else if (status === 'FAIL') {
+      failed++;
+      if (previous?.status !== 'FAIL') freshBreaches++;
+    }
+    else notTested++;
 
     await prisma.covenantResult.upsert({
       where: { definitionId_period: { definitionId: def.id, period: targetPeriod } },
@@ -206,8 +210,9 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
     results.push({ definitionId: def.id, key: def.key, label: def.label, status, value, headroom });
   }
 
-  // Alert every active member of the workspace on a fresh breach.
-  if (failed > 0) {
+  // Alert every active member of the workspace — but only on FRESH breaches,
+  // so automatic re-tests never spam already-known breaches.
+  if (freshBreaches > 0) {
     const members = await prisma.membership.findMany({
       where: { workspaceId, deletedAt: null },
       select: { userId: true },
@@ -217,8 +222,8 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
       userId: m.userId,
       workspaceId,
       kind: 'covenant.breach',
-      title: `${failed} covenant${failed === 1 ? '' : 's'} breached`,
-      body: `${entity?.name ?? 'Entity'} — ${targetPeriod}: ${failed} of ${definitions.length} covenants failed.`,
+      title: `${freshBreaches} new breach${freshBreaches === 1 ? '' : 'es'}`,
+      body: `${entity?.name ?? 'Entity'} — ${targetPeriod}: ${freshBreaches} of ${definitions.length} covenants newly breached (${failed} total failing).`,
       link: '/covenants',
     }));
     if (data.length) {

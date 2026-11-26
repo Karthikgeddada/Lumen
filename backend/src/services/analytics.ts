@@ -1,5 +1,6 @@
 import { prisma } from '../prisma';
 import { parseNumericValue } from './normalizer';
+import { runCovenantTests } from './covenants';
 
 // Analytics are derived from actual stored data — extraction results and
 // metric observations — and every value keeps its derivation (REPORTED /
@@ -106,6 +107,7 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
   if (!entity) return 0;
 
   let created = 0;
+  const affectedPeriods = new Set<string>();
   for (const r of task.results) {
     // Real parsing: "4.82 billion" → 4.82e9, "(1,234)" → -1234 — not naive digit-stripping.
     const numeric = parseNumericValue(r.value, r.unit);
@@ -145,7 +147,14 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
         extractionResultId: r.id,
       },
     });
+    affectedPeriods.add(period);
     created++;
+  }
+
+  // Automatic compliance: re-test covenants for every period that received
+  // numbers. Fire-and-forget — ingest must never fail because of the retest.
+  for (const period of affectedPeriods) {
+    void runCovenantTests(workspaceId, entity.id, period).catch(() => {});
   }
   return created;
 }

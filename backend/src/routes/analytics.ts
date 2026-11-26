@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../prisma';
 import { ApiError, asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace } from '../middleware/auth';
+import { runCovenantTests } from '../services/covenants';
 import { audit } from '../utils';
 import { entityOverview } from '../services/analytics';
 
@@ -80,6 +81,10 @@ router.post(
       create: { ...body, period: body.period.replace(/\s/, ' ') },
       update: { ...body, period: body.period.replace(/\s/, ' ') },
     });
+    // Automatic compliance: re-test this entity's covenants for the affected
+    // period whenever a number lands. Fire-and-forget — entry must never fail
+    // because of the retest.
+    void runCovenantTests(entity.workspaceId, entity.id, body.period.replace(/\s/, ' ')).catch(() => {});
     res.status(201).json({ observation });
   }),
 );
