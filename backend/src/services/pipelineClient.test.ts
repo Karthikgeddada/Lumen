@@ -1,9 +1,25 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mapSidecarResponse, parseViaSidecar, sidecarEnv, sidecarSupported, type SidecarEnv } from './pipelineClient';
+import { execFile } from 'child_process';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  localPythonEnv,
+  mapSidecarResponse,
+  parseViaLocalPython,
+  parseViaSidecar,
+  pythonParsersEnabled,
+  sidecarEnv,
+  sidecarSupported,
+  type LocalPythonEnv,
+  type SidecarEnv,
+} from './pipelineClient';
 
-// Sidecar contract: one precedence order for scales, strict mapping, and a
-// documented fallback reason for every failure mode — uploads never fail
-// because the Python service is down.
+// Python parser contract — remote sidecar AND the in-process runner: strict
+// mapping and a documented fallback reason for every failure mode — uploads
+// never fail because the Python parsers are down or missing.
+
+// parseViaLocalPython spawns the real interpreter — mock child_process so
+// the runner's contract is unit-tested without any Python running.
+vi.mock('child_process', () => ({ execFile: vi.fn() }));
+const execFileMock = vi.mocked(execFile);
 
 const env: SidecarEnv = { url: 'http://sidecar', token: 'tok', timeoutMs: 5000 };
 
@@ -172,5 +188,94 @@ describe('parseViaSidecar', () => {
     }));
     const out = await parseViaSidecar(env, new Uint8Array(), 'a.pdf');
     expect(out).toEqual({ ok: false, reason: 'sidecar unreachable' });
+  });
+});
+
+describe('localPythonEnv / pythonParsersEnabled', () => {
+  it('defaults to python3 + the bundled parse_once.py', () => {
+    const e = localPythonEnv();
+    expect(e.bin).toBe('python3');
+    expect(e.scriptPath.replace(/\\/g, '/').endsWith('python-pipelines/parse_once.py')).toBe(true);
+    expect(e.timeoutMs).toBe(120000);
+  });
+
+  it('honours LUMEN_PYTHON_BIN, LUMEN_PYTHON_SCRIPT and PARSE_TIMEOUT_MS', () => {
+    vi.stubEnv('LUMEN_PYTHON_BIN', ' /opt/py/bin/python ');
+    vi.stubEnv('LUMEN_PYTHON_SCRIPT', 'python-pipelines/parse_once.py');
+    vi.stubEnv('PARSE_TIMEOUT_MS', '5000');
+    const e = localPythonEnv();
+    expect(e.bin).toBe('/opt/py/bin/python');
+    expect(e.timeoutMs).toBe(5000);
+  });
+
+  it('pythonParsersEnabled defaults on and turns off with false/0/off', () => {
+    expect(pythonParsersEnabled()).toBe(true);
+    for (const flag of ['false', '0', 'off', ' FALSE ']) {
+      vi.stubEnv('LUMEN_PYTHON_PARSERS', flag);
+      expect(pythonParsersEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('parseViaLocalPython', () => {
+  const localEnv: LocalPythonEnv = { bin: 'python3', scriptPath: 'python-pipelines/parse_once.py', timeoutMs: 5000 };
+
+  beforeEach(() => {
+    execFileMock.mockReset();
+  });
+
+  // Simulate an execFile result (error or stdout) without any Python running.
+  const setResult = (err: Error | null, stdout: string) =>
+    execFileMock.mockImplementation(
+      ((...args: unknown[]) => {
+        const cb = args[args.length - 1] as (e: Error | null, out?: string) => void;
+        cb(err, stdout);
+      }) as unknown as typeof execFile,
+    );
+
+  it('maps a valid stdout payload and spawns script + file + name', async () => {
+    setResult(null, JSON.stringify(validPayload));
+    const out = await parseViaLocalPython(localEnv, '/tmp/a.pdf', 'a.pdf');
+    expect(out.ok).toBe(true);
+    const [bin, args] = execFileMock.mock.calls[0] as unknown as [string, string[]];
+    expect(bin).toBe('python3');
+    expect(args[0].replace(/\\/g, '/').endsWith('python-pipelines/parse_once.py')).toBe(true);
+    expect(args.slice(1)).toEqual(['/tmp/a.pdf', 'a.pdf']);
+  });
+
+  it('falls back when the interpreter is missing (ENOENT)', async () => {
+    setResult(Object.assign(new Error('spawn nope ENOENT'), { code: 'ENOENT' }), '');
+    const out = await parseViaLocalPython({ ...localEnv, bin: 'nope' }, '/tmp/a.pdf', 'a.pdf');
+    expect(out).toEqual({ ok: false, reason: 'python interpreter not found: nope' });
+  });
+
+  it('falls back with the exit code and stderr on a parse error', async () => {
+    setResult(Object.assign(new Error('exit 1'), { code: 1, stderr: 'parsing failed: bad PDF' }), '');
+    const out = await parseViaLocalPython(localEnv, '/tmp/a.pdf', 'a.pdf');
+    expect(out).toEqual({ ok: false, reason: 'python parser exited with code 1: parsing failed: bad PDF' });
+  });
+
+  it('falls back when the run is killed (timeout)', async () => {
+    setResult(Object.assign(new Error('killed'), { killed: true }), '');
+    const out = await parseViaLocalPython(localEnv, '/tmp/a.pdf', 'a.pdf');
+    expect(out).toEqual({ ok: false, reason: 'python parser timed out after 5000 ms' });
+  });
+
+  it('falls back when stdout is not JSON', async () => {
+    setResult(null, 'not json');
+    const out = await parseViaLocalPython(localEnv, '/tmp/a.pdf', 'a.pdf');
+    expect(out).toEqual({ ok: false, reason: 'python parser returned invalid JSON' });
+  });
+
+  it('falls back when the JSON violates the contract', async () => {
+    setResult(null, JSON.stringify({ hello: 'world' }));
+    const out = await parseViaLocalPython(localEnv, '/tmp/a.pdf', 'a.pdf');
+    expect(out).toEqual({ ok: false, reason: 'python parser payload did not match the parse contract' });
+  });
+
+  it('falls back when the script file is missing (before any spawn)', async () => {
+    const out = await parseViaLocalPython({ ...localEnv, scriptPath: '/nonexistent/parse_once.py' }, '/tmp/a.pdf', 'a.pdf');
+    expect(out).toEqual({ ok: false, reason: 'python parser script not found at /nonexistent/parse_once.py' });
+    expect(execFileMock).not.toHaveBeenCalled();
   });
 });

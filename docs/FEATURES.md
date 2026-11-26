@@ -36,9 +36,9 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 - Download the original file via an expiring signed link
 - Demo-tagged sample documents
 
-**Internally (the ingestion pipeline):** file bytes stored safely (database or S3-compatible storage) → background worker parses per format — **via the Python parsing sidecar when `PARSE_SERVICE_URL` is set** (pdfplumber for PDFs **including table reconstruction**, python-docx for Word body order, openpyxl for Excel values + formulas; falls back to the JS parsers — pdf-parse / mammoth / SheetJS — automatically if the sidecar is unreachable, slow, or returns anything malformed) → chunks with heading/page/sheet labels → embedded locally (open-source MiniLM model, runs on our server, no data leaves) → AI summary generated from the chunks → status set honestly (scanned/image PDFs land in "needs review", not pretended-done).
+**Internally (the ingestion pipeline):** file bytes stored safely (database or S3-compatible storage) → background worker parses per format — **via the in-process Python parsers by default** (pdfplumber for PDFs **including table reconstruction**, python-docx for Word body order, openpyxl for Excel values + formulas, spawned from the same service — zero configuration; falls back to the JS parsers — pdf-parse / mammoth / SheetJS — automatically if Python is missing, times out, or returns anything malformed) → chunks with heading/page/sheet labels → embedded locally (open-source MiniLM model, runs on our server, no data leaves) → AI summary generated from the chunks → status set honestly (scanned/image PDFs land in "needs review", not pretended-done).
 
-**Gaps:** PDF table extraction requires `PARSE_SERVICE_URL` to be set (see 4b and ENVIRONMENT.md — without the sidecar, the JS fallback keeps PDF tables as flat text); scanned PDFs need OCR (not built); questionnaires page cannot yet pick data-room documents; feature pages cannot upload fresh docs inline (pick-only).
+**Gaps:** scanned PDFs need OCR (not built); questionnaires page cannot yet pick data-room documents; feature pages cannot upload fresh docs inline (pick-only).
 
 **Status: LIVE** — nested folders shipped and verified 2026-11-25 (gaps noted).
 
@@ -102,17 +102,17 @@ Lower-precedence scales are never stacked on top of higher ones (explicit double
 
 **Gaps resolved by 4a:** silent 1000×/1M× errors from ignored scale headers.
 
-### 4b. PDF table extraction via the Python parsing sidecar (2026-11-26)
+### 4b. PDF table extraction via the in-process Python parsers (2026-11-26)
 
-**What it is:** financial statements are tables, and the JS pdf parser kept them as flat text — the biggest quality gap in the pipeline. When `PARSE_SERVICE_URL` is set, parsing is delegated to the open-source Python sidecar (`python-pipelines/`, pdfplumber), which reconstructs each table with header, rows, page number, and an honestly-attributed title.
+**What it is:** financial statements are tables, and the JS pdf parser kept them as flat text — the biggest quality gap in the pipeline. Parsing is delegated to the open-source Python parsers (`backend/python-pipelines/`, pdfplumber), which reconstruct each table with header, rows, page number, and an honestly-attributed title.
 
-**How it works:** the worker POSTs the file bytes to the sidecar's `/parse`; the response maps into the exact shape the JS parsers produce (a drop-in swap inside `parseDocument()`), so tables flow into the existing table + row storage, table-aware chunks, the document viewer, and the table-level scale candidates of 4a. Titles never lie: a table's own title row if it has one ("Balance Sheets (In thousands)"), else the nearest text line **above** the table — never a heading from below it; table content is kept out of the paragraph stream so it is never double-reported. Every failure mode — free-tier cold start, unreachable, auth rejection, malformed payload — falls back to the JS parsers with the reason logged; uploads never fail because the sidecar is down.
+**How it works:** one service, zero configuration. The worker spawns `python-pipelines/parse_once.py` per document (`LUMEN_PYTHON_BIN` selects the interpreter — on Render the build-time venv; default `python3`); the script prints the parse JSON to stdout, which maps into the exact shape the JS parsers produce (a drop-in swap inside `parseDocument()`), so tables flow into the existing table + row storage, table-aware chunks, the document viewer, and the table-level scale candidates of 4a. Titles never lie: a table's own title row if it has one ("Balance Sheets (In thousands)"), else the nearest text line **above** the table — never a heading from below it; table content is kept out of the paragraph stream so it is never double-reported. Every failure mode — interpreter missing, script missing, timeout, nonzero exit, malformed payload — falls back to the JS parsers with the reason logged; uploads never fail because Python is down. Off switch: `LUMEN_PYTHON_PARSERS=false`; remote-sidecar escape hatch: `PARSE_SERVICE_URL` (takes precedence when set).
 
-**Verified by:** 17 Vitest cases in `pipelineClient.test.ts` (env wiring, strict contract mapping incl. formula-cell provenance, 401 / timeout / malformed-JSON / unreachable fallbacks); an end-to-end run of uvicorn + the real worker path against a financial-statement PDF (2 tables, correct titles and headers) and against a dead sidecar (logged fallback, honest JS parse). Full suite 100/100, typecheck green.
+**Verified by:** 17 Vitest cases in `pipelineClient.test.ts` for the remote-sidecar path plus 10 for the in-process runner (env wiring incl. the off switch, strict contract mapping incl. formula-cell provenance, ENOENT / exit-code / timeout / invalid-JSON / contract-violation / missing-script fallbacks); an end-to-end run of `parse_once.py` through the real worker path against a financial-statement PDF (tables, correct titles and headers) and with Python missing (logged fallback, honest JS parse). Full suite green, typecheck clean.
 
-**Limits:** needs the `lumen-pipelines` service deployed and `PARSE_SERVICE_URL`/`PIPELINES_TOKEN` set on lumen-api (render.yaml already declares both); free tier sleeps ~15 min → the first parse pays a ~50 s cold start (timeout default 120 s, `PARSE_TIMEOUT_MS`); borderless or whitespace-aligned tables depend on pdfplumber's detection; scanned PDFs still need OCR.
+**Limits:** borderless or whitespace-aligned tables depend on pdfplumber's detection; scanned PDFs still need OCR; on a machine with no Python deps installed the parse degrades to the JS fallback (reason logged) — never silently.
 
-**Status: LIVE (pending the sidecar deploy + env vars in Render).**
+**Status: LIVE (in-process, single service — no sidecar deploy, no env vars needed).**
 
 ## 5. Diligence Questionnaires
 

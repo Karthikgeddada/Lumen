@@ -26,9 +26,11 @@ Copy the `.env.example` in each package to `.env` (backend) / `.env.local` (fron
 | `STORAGE_REGION` / `STORAGE_BUCKET` | yes (prod) | Bucket region and name for document storage. |
 | `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | yes (prod) | Bucket credentials with put/get/delete on the bucket. |
 | `MAX_UPLOAD_MB` | optional | Max upload size (default 500). |
-| `PARSE_SERVICE_URL` | optional | Base URL of the Python parsing sidecar (`python-pipelines/` — pdfplumber reconstructs PDF financial tables, python-docx true body order, openpyxl values+formulas). Unset = JS parsers only (PDF tables stay flat text). Set it after deploying the `lumen-pipelines` service from render.yaml. |
-| `PIPELINES_TOKEN` | optional | Shared secret the sidecar requires (`X-Pipeline-Token` header); copy the value Render generates for the pipelines service. |
-| `PARSE_TIMEOUT_MS` | optional | Abort timeout for sidecar parse calls, in milliseconds (default 120000 — covers the free tier's ~50 s cold start). On timeout the worker falls back to the JS parsers and logs the reason. |
+| `LUMEN_PYTHON_BIN` | optional | Interpreter for the in-process Python parsers (`backend/python-pipelines/` — pdfplumber reconstructs PDF financial tables, python-docx true body order, openpyxl values+formulas). Default `python3`; on Render set by render.yaml to the build-time venv (`/opt/py/bin/python`). Unset/unavailable = the worker logs the reason and falls back to its JS parsers. |
+| `LUMEN_PYTHON_PARSERS` | optional | `false` / `0` / `off` disables the in-process Python parsers (JS parsers only). Default: enabled. |
+| `LUMEN_PYTHON_SCRIPT` | optional | Override for the parse script path (default `python-pipelines/parse_once.py`, relative to `backend/`). |
+| `PARSE_TIMEOUT_MS` | optional | Timeout for Python parse runs (in-process spawn and remote), in milliseconds (default 120000). On timeout the worker falls back to the JS parsers and logs the reason. |
+| `PARSE_SERVICE_URL` / `PIPELINES_TOKEN` | optional | Escape hatch: point the worker at a **remote** Python sidecar instead of the in-process runner (takes precedence when set) — e.g. if the Python workload is ever split onto its own service. |
 
 ## Frontend (`frontend/.env.local`)
 

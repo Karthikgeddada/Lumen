@@ -1,19 +1,26 @@
-// Client for the Python pipelines sidecar (python-pipelines/).
+// Client for the Python parsing pipelines (backend/python-pipelines/).
 //
-// When PARSE_SERVICE_URL is configured, parseDocument() delegates parsing
-// there: pdfplumber reconstructs PDF financial tables (the single biggest
-// accuracy gap of the JS-only parsers — statements stop being flat text),
-// python-docx reads true body order, openpyxl keeps values + formulas with
-// cell refs. Every failure mode — unconfigured, unreachable, cold-start
-// timeout, auth rejection, malformed payload — reports a reason and falls
-// back to the in-process JS parsers, so an upload NEVER fails because the
-// sidecar is down; the reason is logged so a stuck sidecar is never a mystery.
+// Two ways the worker reaches the Python parsers, in precedence order:
+//   1. Local in-process (the default, production path): parseDocument()
+//      spawns python-pipelines/parse_once.py per document — pdfplumber
+//      reconstructs PDF financial tables, python-docx reads true body
+//      order, openpyxl keeps values + formulas with cell refs. One service,
+//      zero configuration.
+//   2. Remote sidecar (optional, advanced): when PARSE_SERVICE_URL is set,
+//      e.g. to split the Python workload onto its own service later.
+// Every failure mode — disabled, missing script/interpreter, timeout,
+// nonzero exit, malformed payload — reports a reason and falls back to the
+// in-process JS parsers, so an upload NEVER fails because Python is down;
+// the reason is logged so a stuck parser is never a mystery.
 //
 // The response mapping is deliberately strict: any shape violation rejects
 // the whole payload and falls back, because a half-trusted parse is worse
-// than an honest JS parse. Pure logic here is unit-tested without a running
-// sidecar (pipelineClient.test.ts).
+// than an honest JS parse. Pure logic here is unit-tested without any
+// Python running (pipelineClient.test.ts).
 
+import { execFile } from 'child_process';
+import { existsSync } from 'fs';
+import path from 'path';
 import type { ParsedCell, ParsedDoc, ParsedSection, ParsedTable } from './parsers';
 
 export interface SidecarEnv {
@@ -35,11 +42,72 @@ export function sidecarEnv(): SidecarEnv | null {
 }
 
 /**
- * Formats the sidecar parses better than the JS parsers. Legacy .xls and
- * .doc stay local — openpyxl and python-docx do not read them.
+ * Formats the Python parsers handle better than the JS parsers. Legacy
+ * .xls and .doc stay local — openpyxl and python-docx do not read them.
  */
 export function sidecarSupported(ext: string): boolean {
   return ext === 'pdf' || ext === 'docx' || ext === 'xlsx' || ext === 'csv';
+}
+
+// ── Local in-process Python (production path: one service, zero config) ──
+
+/** Local Python runner config from the environment. */
+export interface LocalPythonEnv {
+  bin: string;
+  scriptPath: string;
+  timeoutMs: number;
+}
+
+export function localPythonEnv(): LocalPythonEnv {
+  const raw = Number(process.env.PARSE_TIMEOUT_MS ?? '120000');
+  return {
+    bin: (process.env.LUMEN_PYTHON_BIN ?? 'python3').trim() || 'python3',
+    // Resolved against the backend root — the cwd of the api/worker
+    // process both in dev (tsx) and on Render (rootDir: backend).
+    scriptPath: path.resolve((process.env.LUMEN_PYTHON_SCRIPT ?? 'python-pipelines/parse_once.py').trim()),
+    timeoutMs: Number.isFinite(raw) && raw >= 1000 ? raw : 120000,
+  };
+}
+
+/** LUMEN_PYTHON_PARSERS=false|0|off disables the in-process Python parsers (JS only). */
+export function pythonParsersEnabled(): boolean {
+  const flag = (process.env.LUMEN_PYTHON_PARSERS ?? '').trim().toLowerCase();
+  return flag !== 'false' && flag !== '0' && flag !== 'off';
+}
+
+/**
+ * Spawn parse_once.py on a file and map its stdout JSON (same contract as
+ * the HTTP /parse endpoint). Never throws: every failure is a
+ * { ok: false, reason } the caller turns into a JS-parser fallback + log.
+ */
+export function parseViaLocalPython(env: LocalPythonEnv, filePath: string, name: string): Promise<SidecarOutcome> {
+  if (!existsSync(env.scriptPath)) {
+    return Promise.resolve({ ok: false, reason: `python parser script not found at ${env.scriptPath}` });
+  }
+  return new Promise((resolve) => {
+    execFile(env.bin, [env.scriptPath, filePath, name], { timeout: env.timeoutMs, maxBuffer: 256 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => {
+      if (err) {
+        const e = err as { killed?: boolean; code?: unknown; stderr?: string };
+        if (e.killed) {
+          resolve({ ok: false, reason: `python parser timed out after ${env.timeoutMs} ms` });
+        } else if (e.code === 'ENOENT') {
+          resolve({ ok: false, reason: `python interpreter not found: ${env.bin}` });
+        } else {
+          resolve({ ok: false, reason: `python parser exited with code ${String(e.code ?? '?')}: ${String(e.stderr ?? '').slice(0, 200)}` });
+        }
+        return;
+      }
+      let payload: unknown;
+      try {
+        payload = JSON.parse(stdout);
+      } catch {
+        resolve({ ok: false, reason: 'python parser returned invalid JSON' });
+        return;
+      }
+      const doc = mapSidecarResponse(payload);
+      resolve(doc ? { ok: true, doc } : { ok: false, reason: 'python parser payload did not match the parse contract' });
+    });
+  });
 }
 
 // ── Response mapping (strict: any violation → null → JS-parser fallback) ──
