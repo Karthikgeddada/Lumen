@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
 import { api } from '../lib/api';
+import { prefetchRoute } from '../lib/prefetch';
 import { Avatar, timeAgo } from './ui';
 
 interface SearchResults {
@@ -155,7 +156,13 @@ export function Shell({ children }: { children: ReactNode }) {
             {group.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + '/');
               return (
-                <Link key={item.href} href={item.href} className={`nav-item ${active ? 'active' : ''}`}>
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-item ${active ? 'active' : ''}`}
+                  onMouseEnter={() => prefetchRoute(item.href, workspace?.workspace.id)}
+                  onTouchStart={() => prefetchRoute(item.href, workspace?.workspace.id)}
+                >
                   <item.icon size={15.5} strokeWidth={1.9} /> {item.label}
                 </Link>
               );
@@ -164,7 +171,12 @@ export function Shell({ children }: { children: ReactNode }) {
         ))}
 
         <div className="sidebar-foot">
-          <Link href="/library?upload=1" className="nav-item">
+          <Link
+            href="/library?upload=1"
+            className="nav-item"
+            onMouseEnter={() => prefetchRoute('/library', workspace?.workspace.id)}
+            onTouchStart={() => prefetchRoute('/library', workspace?.workspace.id)}
+          >
             <Plus size={15.5} strokeWidth={1.9} /> Upload document
           </Link>
         </div>

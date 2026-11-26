@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { FileSpreadsheet, Plus, Upload, ArrowRight, Trash2 } from 'lucide-react';
@@ -22,6 +23,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 export default function Questionnaires() {
+  const router = useRouter();
   const { workspace, can } = useWorkspace();
   const wid = workspace?.workspace.id;
   const [createOpen, setCreateOpen] = useState(false);
@@ -48,7 +50,7 @@ export default function Questionnaires() {
       });
       setCreateOpen(false);
       setTitle(''); setDescription(''); setDocIds([]);
-      window.location.href = `/questionnaires/${res.questionnaire.id}`;
+      router.push(`/questionnaires/${res.questionnaire.id}`);
     } finally {
       setBusy(false);
     }
