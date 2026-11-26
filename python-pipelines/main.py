@@ -60,16 +60,33 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         page_count = len(pdf.pages)
         for pno, page in enumerate(pdf.pages, start=1):
+            # Find tables FIRST: their bounding boxes let us (a) title each
+            # table from the nearest heading ABOVE it — never one from below
+            # or from a later table, which would be a wrong citation — and
+            # (b) keep table content out of the section text stream so it is
+            # never double-reported (it is already chunked as table rows).
+            found = page.find_tables()
+            boxes = [t.bbox for t in found]  # (x0, top, x1, bottom)
+
+            def in_table(w: dict) -> bool:
+                cx, cy = (w["x0"] + w["x1"]) / 2, (w["top"] + w["bottom"]) / 2
+                return any(b[0] <= cx <= b[2] and b[1] <= cy <= b[3] for b in boxes)
+
             # Font-size-aware heading detection: a line rendered clearly
-            # larger than the page's median text size is a heading.
-            words = page.extract_words(extra_attrs=["size"])
+            # larger than the page's median text size is a heading. The median
+            # is taken over ALL words (tables included — cell text is body-
+            # sized) so a page that is mostly table still detects its title
+            # heading; the section stream itself excludes table words.
+            all_words = page.extract_words(extra_attrs=["size"])
+            sizes_all = [w["size"] for w in all_words]
+            body_size = statistics.median(sizes_all) if sizes_all else 0
+            words = [w for w in all_words if not in_table(w)]
             lines: dict[int, list[tuple[float, str, float]]] = {}
             for w in words:
                 key = round(w["top"] / 3)
                 lines.setdefault(key, []).append((w["x0"], w["text"], w["size"]))
-            sizes = [s for ws in lines.values() for _, _, s in ws]
-            body_size = statistics.median(sizes) if sizes else 0
 
+            page_lines: list[tuple[float, str]] = []  # (approx top, text) — any line, for table titles
             for key in sorted(lines):
                 # Order words by x0 (reading order) — never by their text.
                 ws = sorted(lines[key], key=lambda x: x[0])
@@ -87,16 +104,32 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
                 else:
                     sections.append({"kind": "PARAGRAPH", "headingPath": list(heading_path),
                                      "page": pno, "order": order, "text": text})
+                page_lines.append((key * 3.0, text))
                 order += 1
 
-            for tbl in page.extract_tables() or []:
-                rows = [[(c or "").strip() for c in row] for row in tbl]
+            for tbl in found:
+                rows = [[(c or "").strip() for c in row] for row in (tbl.extract() or [])]
                 rows = [r for r in rows if any(c for c in r)]
                 if not rows:
                     continue
+                # A first row with exactly one non-empty cell is the table's
+                # own title ("Balance Sheets (In thousands)"), not a column
+                # header — financial statements label their tables this way.
+                title: str | None = None
+                if len(rows[0]) > 0 and len([c for c in rows[0] if c]) == 1 and len(rows) > 1:
+                    title_row = rows.pop(0)
+                    title = next(c for c in title_row if c)
+                # Title fallback chain, in order: the table's own title row;
+                # the nearest text line above the table on this page (a
+                # statement's label sits directly above its table); the last
+                # heading seen on an earlier page; the file name. Never a
+                # heading from below the table.
+                if title is None:
+                    above = [h for h in page_lines if h[0] <= tbl.bbox[1]]
+                    title = above[-1][1] if above else (heading_path[-1] if heading_path else base_name)
                 header, body = rows[0], rows[1:]
                 tables.append({"page": pno, "order": t_order,
-                               "title": heading_path[-1] if heading_path else base_name,
+                               "title": title,
                                "sheet": None, "header": header,
                                "rows": [{"rowIndex": i, "cells": r} for i, r in enumerate(body)]})
                 t_order += 1

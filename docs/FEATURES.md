@@ -36,9 +36,9 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 - Download the original file via an expiring signed link
 - Demo-tagged sample documents
 
-**Internally (the ingestion pipeline):** file bytes stored safely (database or S3-compatible storage) → background worker parses per format (pdf-parse for PDFs, mammoth for Word, SheetJS for Excel) → chunks with heading/page/sheet labels → embedded locally (open-source MiniLM model, runs on our server, no data leaves) → AI summary generated from the chunks → status set honestly (scanned/image PDFs land in "needs review", not pretended-done).
+**Internally (the ingestion pipeline):** file bytes stored safely (database or S3-compatible storage) → background worker parses per format — **via the Python parsing sidecar when `PARSE_SERVICE_URL` is set** (pdfplumber for PDFs **including table reconstruction**, python-docx for Word body order, openpyxl for Excel values + formulas; falls back to the JS parsers — pdf-parse / mammoth / SheetJS — automatically if the sidecar is unreachable, slow, or returns anything malformed) → chunks with heading/page/sheet labels → embedded locally (open-source MiniLM model, runs on our server, no data leaves) → AI summary generated from the chunks → status set honestly (scanned/image PDFs land in "needs review", not pretended-done).
 
-**Gaps:** PDF tables are kept as text (no table reconstruction yet); scanned PDFs need OCR (not built); questionnaires page cannot yet pick data-room documents; feature pages cannot upload fresh docs inline (pick-only).
+**Gaps:** PDF table extraction requires `PARSE_SERVICE_URL` to be set (see 4b and ENVIRONMENT.md — without the sidecar, the JS fallback keeps PDF tables as flat text); scanned PDFs need OCR (not built); questionnaires page cannot yet pick data-room documents; feature pages cannot upload fresh docs inline (pick-only).
 
 **Status: LIVE** — nested folders shipped and verified 2026-11-25 (gaps noted).
 
@@ -74,7 +74,7 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **Internally:** task created → worker job → per document × field, the LLM reads retrieved chunks and returns a structured value + provenance → results stored for review. Verified results are upserted into analytics keyed by entity + metric + period (period parsed from the document name). **Value normalization:** raw strings like "$4.82 billion", "4,820 million", "(1,234)" (US and EU number formats, accounting negatives, spelled-out and abbreviated multipliers) are converted to true numbers on ingest — 25-case test suite against the shipped module.
 
-**Gaps:** PDF table detection (tables are kept as text), OCR for scanned documents. Unit-scale detection now shipped (see below).
+**Gaps:** OCR for scanned documents. PDF table extraction now shipped (see 4b) alongside unit-scale detection (4a).
 
 ### 4a. Unit-scale detection (2026-11-26)
 
@@ -101,6 +101,18 @@ Lower-precedence scales are never stacked on top of higher ones (explicit double
 **Status: LIVE** — see FEATURES item 4 above for the review flow it plugs into.
 
 **Gaps resolved by 4a:** silent 1000×/1M× errors from ignored scale headers.
+
+### 4b. PDF table extraction via the Python parsing sidecar (2026-11-26)
+
+**What it is:** financial statements are tables, and the JS pdf parser kept them as flat text — the biggest quality gap in the pipeline. When `PARSE_SERVICE_URL` is set, parsing is delegated to the open-source Python sidecar (`python-pipelines/`, pdfplumber), which reconstructs each table with header, rows, page number, and an honestly-attributed title.
+
+**How it works:** the worker POSTs the file bytes to the sidecar's `/parse`; the response maps into the exact shape the JS parsers produce (a drop-in swap inside `parseDocument()`), so tables flow into the existing table + row storage, table-aware chunks, the document viewer, and the table-level scale candidates of 4a. Titles never lie: a table's own title row if it has one ("Balance Sheets (In thousands)"), else the nearest text line **above** the table — never a heading from below it; table content is kept out of the paragraph stream so it is never double-reported. Every failure mode — free-tier cold start, unreachable, auth rejection, malformed payload — falls back to the JS parsers with the reason logged; uploads never fail because the sidecar is down.
+
+**Verified by:** 17 Vitest cases in `pipelineClient.test.ts` (env wiring, strict contract mapping incl. formula-cell provenance, 401 / timeout / malformed-JSON / unreachable fallbacks); an end-to-end run of uvicorn + the real worker path against a financial-statement PDF (2 tables, correct titles and headers) and against a dead sidecar (logged fallback, honest JS parse). Full suite 100/100, typecheck green.
+
+**Limits:** needs the `lumen-pipelines` service deployed and `PARSE_SERVICE_URL`/`PIPELINES_TOKEN` set on lumen-api (render.yaml already declares both); free tier sleeps ~15 min → the first parse pays a ~50 s cold start (timeout default 120 s, `PARSE_TIMEOUT_MS`); borderless or whitespace-aligned tables depend on pdfplumber's detection; scanned PDFs still need OCR.
+
+**Status: LIVE (pending the sidecar deploy + env vars in Render).**
 
 ## 5. Diligence Questionnaires
 
@@ -220,7 +232,7 @@ A `Report` model and a `RUN_REPORT` job type exist in the codebase, but there is
 | Web framework | Express (API) + Next.js/React (UI) | MIT | Standard, hostable anywhere |
 | Database + ORM | PostgreSQL (Neon) + Prisma | Apache-2.0 | Typed data layer, migrations |
 | Object storage | Postgres BYTEA now; S3-compatible (Supabase Storage) when configured | — | Same code path both ways, lazy migration |
-| PDF parsing | pdf-parse | MIT | Page-splitting, text + headings |
+| PDF parsing | pdfplumber sidecar (fallback: pdf-parse) | MIT | Table reconstruction + font-size headings; the JS fallback keeps page-splitting text + headings |
 | Word parsing | mammoth | BSD-2 | DOCX → semantic HTML |
 | Excel/CSV parsing | SheetJS (xlsx) | Apache-2.0 | Sheets → tables + rows |
 | Chunking | custom (services/chunker.ts) | in-repo | Heading-path + page aware, source-linked |
