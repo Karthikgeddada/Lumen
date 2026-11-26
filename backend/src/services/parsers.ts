@@ -4,7 +4,7 @@ import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { logger } from '../logger';
-import { parseViaSidecar, sidecarEnv, sidecarSupported } from './pipelineClient';
+import { localPythonEnv, parseViaLocalPython, parseViaSidecar, pythonParsersEnabled, sidecarEnv, sidecarSupported } from './pipelineClient';
 
 // Parsers for each supported format. Everything preserves provenance:
 // pages for PDFs, headings/paragraphs/footnotes for text documents, and
@@ -95,9 +95,9 @@ async function parsePdf(filePath: string): Promise<ParsedDoc> {
     pageCount: data.numpages ?? pages.length,
     ocrRequired: totalChars < pages.length * 20, // effectively no text layer
     sections,
-    // Fallback only: pdf-parse has no table detector. When the Python
-    // sidecar (PARSE_SERVICE_URL) is configured, PDF tables are extracted
-    // by pdfplumber before this parser is ever reached.
+    // Fallback only: pdf-parse has no table detector. The Python parsers
+    // (in-process by default) extract PDF tables via pdfplumber before
+    // this parser is ever reached.
     tables: [],
   };
 }
@@ -209,15 +209,25 @@ function parseTxt(buffer: Buffer): ParsedDoc {
 
 // ── Dispatch ────────────────────────────────────────────────────────────
 export async function parseDocument(filePath: string, ext: string, baseName: string): Promise<ParsedDoc> {
-  // Python sidecar first (pdfplumber PDF tables, true DOCX body order,
-  // openpyxl values + formulas). Any failure falls back to the JS parsers
-  // below — logged with the reason, so a stuck sidecar is never a mystery
-  // and uploads never fail because of it.
-  const env = sidecarEnv();
-  if (env && sidecarSupported(ext)) {
-    const outcome = await parseViaSidecar(env, fs.readFileSync(filePath), `${baseName}.${ext}`);
-    if (outcome.ok) return outcome.doc;
-    logger.warn({ ext, reason: outcome.reason }, 'parse sidecar unavailable — using JS parsers');
+  // Python parsers first (pdfplumber PDF tables, true DOCX body order,
+  // openpyxl values + formulas): in-process by default — the worker
+  // spawns python-pipelines/parse_once.py from the same service; a remote
+  // sidecar (PARSE_SERVICE_URL) takes precedence when configured. Any
+  // failure falls back to the JS parsers below — logged with the reason,
+  // so a stuck parser is never a mystery and uploads never fail because
+  // of it.
+  if (sidecarSupported(ext)) {
+    const remote = sidecarEnv();
+    if (remote) {
+      const outcome = await parseViaSidecar(remote, fs.readFileSync(filePath), `${baseName}.${ext}`);
+      if (outcome.ok) return outcome.doc;
+      logger.warn({ ext, reason: outcome.reason }, 'parse sidecar unavailable — trying local python parsers');
+    }
+    if (pythonParsersEnabled()) {
+      const outcome = await parseViaLocalPython(localPythonEnv(), filePath, `${baseName}.${ext}`);
+      if (outcome.ok) return outcome.doc;
+      logger.warn({ ext, reason: outcome.reason }, 'python parsers unavailable — using JS parsers');
+    }
   }
   switch (ext) {
     case 'pdf':

@@ -1,48 +1,39 @@
-"""Lumen Python Pipelines — Module 1: Document Parsing Engine.
+"""Lumen Python Pipelines — Module 1: Document Parsing Engine (core).
 
-Open-source only (pdfplumber, python-docx, openpyxl, pandas). Runs as a
-FastAPI service the Node worker calls when PARSE_SERVICE_URL is set; Node
-falls back to its JS parsers when the service is unreachable, so this is
-strictly additive.
+Pure parsing functions — no web framework imports, heavy libraries
+(pdfplumber / python-docx / openpyxl / pandas) load lazily per call, and
+only the ones the file type needs. Runs in two ways:
+  1. In-process: the Node worker spawns parse_once.py per document (the
+     production path — one service, zero configuration).
+  2. Via the FastAPI harness in main.py (optional local dev HTTP service).
 
-Response contract mirrors the Node ParsedDoc shape exactly:
+Output contract mirrors the Node ParsedDoc shape exactly:
 {
   "pageCount": int|null, "ocrRequired": bool,
   "sections": [{"kind": "HEADING"|"PARAGRAPH", "headingPath": [...], "page": int|null, "order": int, "text": str}],
   "tables":   [{"page": int|null, "order": int, "title": str|null, "sheet": str|null, "header": [...]|null,
                 "rows": [{"rowIndex": int, "cells": [str | {"v": str, "ref": str, "f": str}]}]}]
 }
-
-Run locally:  uvicorn main:app --port 8100
-Call:         curl --data-binary @doc.pdf -H "Content-Type: application/octet-stream" \n              -H "X-Pipeline-Token: $PIPELINES_TOKEN" "localhost:8100/parse?name=doc.pdf"
 """
 
 import io
-import os
 import statistics
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
 
-MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "100"))
-TOKEN = os.environ.get("PIPELINES_TOKEN", "")
-
-app = FastAPI(title="Lumen Pipelines", version="0.1.0")
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"ok": "true", "service": "pipelines", "module": "parsing"}
-
-
-def _check_token(header: str | None) -> None:
-    if TOKEN and header != TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid pipeline token")
-
-
-def _check_size(data: bytes) -> None:
-    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(status_code=413, detail=f"File exceeds {MAX_UPLOAD_MB} MB limit")
+def parse_dispatch(data: bytes, name: str) -> dict[str, Any]:
+    """Dispatch by the original file name's extension."""
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    base_name = name.rsplit(".", 1)[0]
+    if ext == "pdf":
+        return parse_pdf(data, base_name)
+    if ext in ("docx", "doc"):
+        return parse_docx(data)
+    if ext == "xlsx":
+        return parse_xlsx(data, base_name)
+    if ext == "csv":
+        return parse_csv(data, base_name)
+    raise ValueError(f"Unsupported type: {ext or 'unknown'}")
 
 
 # ── PDF ────────────────────────────────────────────────────────────────
@@ -221,7 +212,7 @@ def parse_xlsx(data: bytes, base_name: str) -> dict[str, Any]:
                     cells.append("")
                 elif formula:
                     cells.append({"v": "" if value is None else str(value),
-                                  "ref": cell.coordinate, "f": formula})
+                                   "ref": cell.coordinate, "f": formula})
                 else:
                     cells.append(str(value))
             # Trim fully-empty trailing cells.
@@ -259,35 +250,3 @@ def parse_csv(data: bytes, base_name: str) -> dict[str, Any]:
              "header": header, "rows": rows}
     section = {"kind": "HEADING", "headingPath": [base_name], "page": None, "order": 0, "text": base_name}
     return {"pageCount": 1, "ocrRequired": len(rows) == 0, "sections": [section], "tables": [table]}
-
-
-# ── Dispatch ───────────────────────────────────────────────────────────
-@app.post("/parse")
-async def parse(
-    request: Request,
-    name: str = Query(..., description="Original file name, e.g. report.pdf"),
-    x_pipeline_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    """Raw-body upload (application/octet-stream) — deliberately no multipart
-    so no python-multipart dependency is needed."""
-    _check_token(x_pipeline_token)
-    data = await request.body()
-    _check_size(data)
-
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    base_name = name.rsplit(".", 1)[0]
-
-    try:
-        if ext == "pdf":
-            return parse_pdf(data, base_name)
-        if ext in ("docx", "doc"):
-            return parse_docx(data)
-        if ext == "xlsx":
-            return parse_xlsx(data, base_name)
-        if ext == "csv":
-            return parse_csv(data, base_name)
-        raise HTTPException(status_code=415, detail=f"Unsupported type: {ext or 'unknown'}")
-    except HTTPException:
-        raise
-    except Exception as exc:  # malformed / password-protected files etc.
-        raise HTTPException(status_code=422, detail=f"Parsing failed: {exc}")

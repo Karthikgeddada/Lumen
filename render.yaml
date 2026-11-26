@@ -14,7 +14,12 @@ services:
     rootDir: backend # monorepo — build and start inside backend/ (repo root has no package.json)
     plan: free
     region: singapore # closest free region to India; switch to oregon if unavailable on free
-    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    # Python parsers (backend/python-pipelines/) run IN-PROCESS: the worker
+    # spawns parse_once.py per document. The build installs their deps into a
+    # venv (pdfplumber / python-docx / openpyxl / pandas) — no second service,
+    # no PARSE_SERVICE_URL, no token. If the venv can't be built the deploy
+    # fails loudly at build time (never a silent parse downgrade).
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build && (python3 -m venv /opt/py || (apt-get update -qq && apt-get install -y -qq python3-venv && python3 -m venv /opt/py)) && /opt/py/bin/pip install --quiet -r python-pipelines/requirements.txt
     startCommand: npx prisma migrate deploy && node scripts/start-all.js
     healthCheckPath: /api/health
     autoDeploy: true
@@ -42,28 +47,13 @@ services:
         value: Xenova/all-MiniLM-L6-v2 # open-source, 384-dim, ONNX; downloaded on first use (~25 MB)
       - key: MAX_UPLOAD_MB
         value: "500"
-      # Python pipelines sidecar (python-pipelines/): set after its first deploy.
-      # Unset = Node uses its built-in JS parsers (current behavior).
-      - key: PARSE_SERVICE_URL
-        sync: false
-      - key: PIPELINES_TOKEN
-        sync: false
-
-  # Module 1: Document Parsing Engine (pdfplumber / python-docx / openpyxl / pandas).
-  # Free tier sleeps ~15 min idle (~50 s cold start); the API falls back to its
-  # JS parsers when this is unreachable, so it is safe to leave unconfigured.
-  - type: web
-    name: lumen-pipelines
-    runtime: python
-    rootDir: python-pipelines
-    plan: free
-    region: singapore
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-    autoDeploy: true
-    envVars:
-      - key: PIPELINES_TOKEN
-        generateValue: true
-      - key: MAX_UPLOAD_MB
-        value: "100"
+      # Python parsers (backend/python-pipelines/) are enabled by default and
+      # run in-process — zero configuration. LUMEN_PYTHON_BIN points at the
+      # venv built above; unset, the worker uses plain python3 (local dev).
+      # Off switch / escape hatches (dashboard): LUMEN_PYTHON_PARSERS=false
+      # (JS parsers only) or PARSE_SERVICE_URL + PIPELINES_TOKEN (remote
+      # sidecar, if you ever split the Python workload out again).
+      - key: LUMEN_PYTHON_BIN
+        value: /opt/py/bin/python
+      - key: PARSE_TIMEOUT_MS
+        value: "120000"
