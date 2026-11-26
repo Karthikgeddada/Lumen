@@ -1,0 +1,4 @@
+# Dev/test dependencies (not needed at runtime)
+pytest==8.3.4
+httpx==0.28.1
+reportlab==4.2.5

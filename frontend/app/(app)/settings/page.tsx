@@ -194,6 +194,9 @@ export default function Settings() {
           )}
         </div>
 
+        {/* Figure validation rules (spec C1) */}
+        <ValidationRulesCard wid={wid} canEdit={can('EDITOR')} />
+
         {/* Security notice */}
         <div className="card card-pad" style={{ background: 'var(--sunken)', boxShadow: 'none' }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Security & sessions</div>
@@ -204,6 +207,147 @@ export default function Settings() {
         </div>
       </div>
     </main>
+  );
+}
+
+// Figure validation rules (spec C1) — the same config the extraction
+// runner applies after every upload. Every check is a review flag, never a
+// silent rejection: a flagged figure stays in the queue until a human owns
+// the discrepancy.
+type SumRow = { label: string; total: string; components: string; tolerancePct: string };
+type BsRow = { assets: string; liabilities: string; equity: string; tolerancePct: string };
+
+const csv = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+
+function ValidationRulesCard({ wid, canEdit }: { wid?: string; canEdit: boolean }) {
+  const [sumRows, setSumRows] = useState<SumRow[] | null>(null);
+  const [bsRows, setBsRows] = useState<BsRow[] | null>(null);
+  const [qoq, setQoq] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const { data } = useSWR(wid ? `val-${wid}` : null, () =>
+    api<{ rules: { componentSums?: { label?: string; total: string; components: string[]; tolerancePct?: number }[]; balanceSheets?: { assets: string; liabilities: string[]; equity: string[]; tolerancePct?: number }[]; qoqOutlierPct?: number | null } }>(`/api/workspaces/${wid}/validation`));
+
+  useEffect(() => {
+    if (!data?.rules || sumRows) return;
+    setSumRows((data.rules.componentSums ?? []).map((r) => ({
+      label: r.label ?? '', total: r.total, components: r.components.join(', '),
+      tolerancePct: r.tolerancePct != null ? String(r.tolerancePct) : '',
+    })));
+    setBsRows((data.rules.balanceSheets ?? []).map((r) => ({
+      assets: r.assets, liabilities: r.liabilities.join(', '), equity: r.equity.join(', '),
+      tolerancePct: r.tolerancePct != null ? String(r.tolerancePct) : '',
+    })));
+    setQoq(data.rules.qoqOutlierPct != null ? String(data.rules.qoqOutlierPct) : '');
+  }, [data, sumRows]);
+
+  async function save() {
+    setBusy(true); setErr(null);
+    try {
+      const componentSums = (sumRows ?? [])
+        .filter((r) => r.total.trim() && csv(r.components).length)
+        .map((r) => ({
+          total: r.total.trim(), components: csv(r.components),
+          ...(r.label.trim() ? { label: r.label.trim() } : {}),
+          ...(r.tolerancePct !== '' ? { tolerancePct: parseFloat(r.tolerancePct) } : {}),
+        }));
+      const balanceSheets = (bsRows ?? [])
+        .filter((r) => r.assets.trim() && csv(r.liabilities).length && csv(r.equity).length)
+        .map((r) => ({
+          assets: r.assets.trim(), liabilities: csv(r.liabilities), equity: csv(r.equity),
+          ...(r.tolerancePct !== '' ? { tolerancePct: parseFloat(r.tolerancePct) } : {}),
+        }));
+      await api(`/api/workspaces/${wid}/validation`, {
+        method: 'PUT',
+        body: {
+          ...(componentSums.length ? { componentSums } : {}),
+          ...(balanceSheets.length ? { balanceSheets } : {}),
+          qoqOutlierPct: qoq !== '' ? parseFloat(qoq) : null,
+        },
+      });
+      setSaved(true); setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not save validation rules.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const setSum = (i: number, patch: Partial<SumRow>) =>
+    setSumRows((sumRows ?? []).map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  const setBs = (i: number, patch: Partial<BsRow>) =>
+    setBsRows((bsRows ?? []).map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div className="card-title">Figure validation</div>
+        <span className="card-sub">Checks every upload’s figures — mismatches are flagged for review, never silently accepted</span>
+      </div>
+      {!canEdit ? (
+        <div style={{ padding: 20, fontSize: 13, color: 'var(--text-muted)' }}>
+          Only workspace editors can change validation rules.
+        </div>
+      ) : !sumRows || !bsRows ? (
+        <LoadingBlock label="Loading validation rules…" />
+      ) : (
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Component sums */}
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 560, marginBottom: 2 }}>Component sums</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Components must sum to the total within a tolerance (default 0.5%). Use metric field keys, comma-separated.
+            </div>
+            {sumRows.map((r, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.6fr 0.7fr auto', gap: 6, marginBottom: 6 }}>
+                <input className="input" placeholder="Label" value={r.label} onChange={(e) => setSum(i, { label: e.target.value })} />
+                <input className="input mono" placeholder="total_revenue" value={r.total} onChange={(e) => setSum(i, { total: e.target.value })} />
+                <input className="input mono" placeholder="seg_a, seg_b" value={r.components} onChange={(e) => setSum(i, { components: e.target.value })} />
+                <input className="input mono" placeholder="0.5 = %" value={r.tolerancePct} onChange={(e) => setSum(i, { tolerancePct: e.target.value })} />
+                <button className="btn btn-ghost btn-sm" onClick={() => setSumRows(sumRows.filter((_, idx) => idx !== i))}>Remove</button>
+              </div>
+            ))}
+            <button className="btn btn-secondary btn-sm" onClick={() => setSumRows([...sumRows, { label: '', total: '', components: '', tolerancePct: '' }])}>+ Add sum check</button>
+          </div>
+
+          {/* Balance-sheet identity */}
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 560, marginBottom: 2 }}>Balance-sheet identity</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Assets = liabilities + equity. Comma-separated field keys per side.
+            </div>
+            {bsRows.map((r, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr 1.4fr 0.7fr auto', gap: 6, marginBottom: 6 }}>
+                <input className="input mono" placeholder="total_assets" value={r.assets} onChange={(e) => setBs(i, { assets: e.target.value })} />
+                <input className="input mono" placeholder="debt, payables" value={r.liabilities} onChange={(e) => setBs(i, { liabilities: e.target.value })} />
+                <input className="input mono" placeholder="equity" value={r.equity} onChange={(e) => setBs(i, { equity: e.target.value })} />
+                <input className="input mono" placeholder="0.5 = %" value={r.tolerancePct} onChange={(e) => setBs(i, { tolerancePct: e.target.value })} />
+                <button className="btn btn-ghost btn-sm" onClick={() => setBsRows((bsRows ?? []).filter((_, idx) => idx !== i))}>Remove</button>
+              </div>
+            ))}
+            <button className="btn btn-secondary btn-sm" onClick={() => setBsRows([...(bsRows ?? []), { assets: '', liabilities: '', equity: '', tolerancePct: '' }])}>+ Add balance-sheet check</button>
+          </div>
+
+          {/* QoQ outlier */}
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 560, marginBottom: 2 }}>Quarter-over-quarter outlier</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Flags a figure that changed more than this % vs the previous stored quarter. Leave empty to keep it off — growth is real.
+            </div>
+            <input className="input mono" style={{ width: 140 }} placeholder="off" value={qoq} onChange={(e) => setQoq(e.target.value)} />
+          </div>
+
+          {err ? <ErrorBanner message={err} /> : null}
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button className="btn btn-primary" onClick={save} disabled={busy}>
+              {saved ? 'Saved ✓' : 'Save validation rules'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

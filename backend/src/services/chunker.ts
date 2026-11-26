@@ -1,4 +1,4 @@
-import type { ParsedDoc, ParsedTable, ParsedSection } from './parsers';
+import type { ParsedCell, ParsedDoc, ParsedTable, ParsedSection } from './parsers';
 
 // Retrieval units. Every chunk keeps its source pointers — page, heading
 // breadcrumb, table identity — so every AI answer can cite exactly where a
@@ -13,6 +13,7 @@ export type ChunkDraft = {
   rowIndex?: number;
   kind: 'PARAGRAPH' | 'TABLE_ROW' | 'FOOTNOTE' | 'SHEET';
   text: string;
+  regions?: unknown[]; // evidence geometry (PDF bboxes | DOCX paragraph | XLSX range | TXT lines)
 };
 
 const MAX_CHUNK_CHARS = 1800;
@@ -26,12 +27,23 @@ export function chunksFromSections(doc: ParsedDoc): ChunkDraft[] {
     const path = current.parts[0].headingPath;
     const label = path.length ? `${path.join(' › ')}\n` : '';
     const body = current.parts.map((p) => p.text).join('\n');
+    // Evidence regions: PDF → line bboxes on the page; TXT → 1-based line
+    // range; DOCX → paragraph index (no fixed pages). Never fabricated.
+    const regions = current.parts
+      .map((p): object | null => {
+        if (p.lineStart != null) return { startLine: p.lineStart, endLine: p.lineEnd ?? p.lineStart };
+        if (p.bbox && p.page != null) return { page: p.page, bbox: p.bbox };
+        if (p.page == null) return { paragraph: p.order };
+        return null;
+      })
+      .filter((r): r is object => r != null);
     out.push({
       page: current.page,
       sheet: null,
       headingPath: path,
       kind: current.parts.some((p) => p.kind === 'FOOTNOTE') ? 'FOOTNOTE' : 'PARAGRAPH',
       text: label + body,
+      regions,
     });
     current = null;
   };
@@ -76,6 +88,17 @@ export function chunksFromTable(table: ParsedTable, tableIndex: number): ChunkDr
         return `${label}: ${cell.v}${f} (${cell.ref})`;
       })
       .join('\n');
+    // Regions: PDF rows carry their bbox on the page; spreadsheet rows cite
+    // the sheet + first..last cell range.
+    let regions: object[] | undefined;
+    if (row.bbox && table.page != null) {
+      regions = [{ page: table.page, bbox: row.bbox }];
+    } else if (table.sheet) {
+      const refs = row.cells
+        .filter((c): c is ParsedCell => typeof c !== 'string' && !!c.ref)
+        .map((c) => c.ref);
+      if (refs.length) regions = [{ sheet: table.sheet, range: `${refs[0]}:${refs[refs.length - 1]}` }];
+    }
     out.push({
       page: table.page ?? null,
       sheet: table.sheet ?? null,
@@ -84,6 +107,7 @@ export function chunksFromTable(table: ParsedTable, tableIndex: number): ChunkDr
       rowIndex: row.rowIndex,
       kind: 'TABLE_ROW',
       text: `${table.title ?? 'Table'}${loc}${headerLine ? '\n' + headerLine : ''}\nRow ${row.rowIndex + 1}:\n${pairs}`,
+      regions,
     });
   }
   return out;

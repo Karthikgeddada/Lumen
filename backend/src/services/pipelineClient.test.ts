@@ -129,6 +129,63 @@ describe('mapSidecarResponse', () => {
     expect(mapSidecarResponse({ ...validPayload, tables: [{ ...validPayload.tables[0], rows: [{ rowIndex: 0, cells: [17] }] }] })).toBeNull(); // non-cell
     expect(mapSidecarResponse({ ...validPayload, sections: [{ ...validPayload.sections[1], headingPath: 'x' }] })).toBeNull();
   });
+
+  // PDF geometry from pdfplumber — bboxes, contextAbove, page text lines.
+  // Same contract for the remote sidecar and the in-process runner.
+  describe('PDF geometry (bboxes, refs, page lines)', () => {
+    const bbox = { x0: 72, top: 100, x1: 460, bottom: 130 };
+    const cellBboxes = [{ x0: 72, top: 100, x1: 200, bottom: 130 }, null, { x0: 330, top: 100, x1: 460, bottom: 130 }];
+    const geomRow = { rowIndex: 0, cells: ['Cash', '1,204', '980'], bbox, cellBboxes };
+    const geomTable = {
+      page: 3, order: 1, title: 'Balance Sheets', sheet: null,
+      pageWidth: 612, pageHeight: 792, bbox, contextAbove: ['(In thousands)'],
+      header: ['', '2025', '2024'], rows: [geomRow],
+    };
+    const geomPayload = {
+      pageCount: 3, ocrRequired: false,
+      sections: [{ kind: 'HEADING' as const, headingPath: [], page: 3, order: 0, text: 'Balance  Sheets' }],
+      tables: [geomTable],
+      pages: [{ page: 3, width: 612, height: 792, headerText: 'Balance Sheets', lines: [{ text: 'Balance  Sheets', bbox: { x0: 70, top: 80, x1: 300, bottom: 95 } }] }],
+    };
+
+    it('carries table/row geometry, contextAbove and pdfPages through', () => {
+      const doc = mapSidecarResponse(geomPayload)!;
+      const t = doc.tables[0];
+      expect(t.pageWidth).toBe(612);
+      expect(t.pageHeight).toBe(792);
+      expect(t.bbox).toEqual(bbox);
+      expect(t.contextAbove).toEqual(['(In thousands)']);
+      expect(t.rows[0].bbox).toEqual(bbox);
+      expect(doc.pdfPages?.[0].lines[0].bbox.x0).toBe(70);
+    });
+
+    it('gives PDF object cells honest p/t/r/c refs; strings stay strings', () => {
+      const doc = mapSidecarResponse({
+        ...geomPayload,
+        tables: [{
+          ...geomTable,
+          rows: [{ rowIndex: 0, bbox, cellBboxes, cells: ['Cash', { v: '1,204' }, { v: '980', ref: 'K9' }] }],
+        }],
+      })!;
+      const cells = doc.tables[0].rows[0].cells;
+      expect(typeof cells[0]).toBe('string');
+      // grid null for this cell → honest fallback to the row bbox, never guessed
+      expect(cells[1]).toEqual({ v: '1,204', ref: 'p3 t1 r0 c1', bbox });
+      expect(cells[2]).toEqual({ v: '980', ref: 'K9', bbox: cellBboxes[2] });
+    });
+
+    it('attaches section bboxes by matching normalized text on the page', () => {
+      const doc = mapSidecarResponse(geomPayload)!;
+      expect(doc.sections[0].bbox).toEqual({ x0: 70, top: 80, x1: 300, bottom: 95 });
+    });
+
+    it('rejects malformed geometry (never half-trusted)', () => {
+      expect(mapSidecarResponse({ ...geomPayload, pages: [{ page: 3, width: 612, height: 792, lines: [{ text: 'x', bbox: 'nope' }] }] })).toBeNull();
+      expect(mapSidecarResponse({ ...geomPayload, tables: [{ ...geomTable, bbox: 'nope' }] })).toBeNull();
+      expect(mapSidecarResponse({ ...geomPayload, tables: [{ ...geomTable, contextAbove: 'nope' }] })).toBeNull();
+      expect(mapSidecarResponse({ ...geomPayload, tables: [{ ...geomTable, rows: [{ ...geomRow, cellBboxes: [{}] }] }] })).toBeNull();
+    });
+  });
 });
 
 describe('parseViaSidecar', () => {

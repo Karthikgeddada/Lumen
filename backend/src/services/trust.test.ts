@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyScaleResolution, evaluateCovenant, scaleFlags, scaleUnresolved } from './trust';
+import { applyScaleResolution, evaluateCovenant, ingestConflict, isFreshBreach, sameNumber, scaleFlags, scaleUnresolved } from './trust';
 
 // TRUST RULE: a figure with unresolved scale flags must never be verifiable,
 // ingestible, or testable against a covenant — at any layer.
@@ -185,5 +185,65 @@ describe('ingest gate refuses exactly what scaleUnresolved rejects', () => {
     ).toBe(false); // resolved -> ingested
     expect(refused(null)).toBe(false); // no flags -> ingested
     expect(refused({ multiplier: 1000, appliedFrom: 'table_header' })).toBe(false); // clean header scale -> ingested
+  });
+});
+
+describe('sameNumber + ingestConflict (ingest overwrite guard)', () => {
+  it('exactly equal values are the same figure', () => {
+    expect(sameNumber(4820000, 4820000)).toBe(true);
+    expect(sameNumber(1.31, 1.31)).toBe(true);
+  });
+
+  it('float parse noise within one part in a billion is the same figure', () => {
+    expect(sameNumber(4820000, 4820000 + 1e-6)).toBe(true); // tolerance ≈ 4.8e-3 at this magnitude
+  });
+
+  it('materially different values are a conflict — never overwritten silently', () => {
+    expect(sameNumber(4820000, 9860)).toBe(false);
+    expect(sameNumber(4820000, 4820001)).toBe(false);
+  });
+
+  it('ingestConflict reports entity, metric, period, existing vs new', () => {
+    const c = ingestConflict(
+      'Halden Industrial', 'revenue', 'Q3 2026',
+      { value: 461000000, derivation: 'REPORTED', sourceDocumentId: 'doc-old' },
+      { value: 4820000, sourceDocumentId: 'doc-new' },
+    );
+    expect(c).toEqual({
+      entity: 'Halden Industrial',
+      metric: 'revenue',
+      period: 'Q3 2026',
+      existingValue: 461000000,
+      existingDerivation: 'REPORTED',
+      existingSourceDocumentId: 'doc-old',
+      newValue: 4820000,
+      newSourceDocumentId: 'doc-new',
+    });
+  });
+});
+
+describe('isFreshBreach (NOT_TESTED must not mask a known breach)', () => {
+  it('no previous result is a fresh breach', () => {
+    expect(isFreshBreach(null)).toBe(true);
+  });
+
+  it('previous FAIL is a known breach — not fresh', () => {
+    expect(isFreshBreach({ status: 'FAIL' })).toBe(false);
+  });
+
+  it('FAIL -> NOT_TESTED -> FAIL is the same known breach — not fresh', () => {
+    expect(isFreshBreach({ status: 'NOT_TESTED', previousStatus: 'FAIL' })).toBe(false);
+  });
+
+  it('PASS -> NOT_TESTED -> FAIL IS fresh (last real status was PASS)', () => {
+    expect(isFreshBreach({ status: 'NOT_TESTED', previousStatus: 'PASS' })).toBe(true);
+  });
+
+  it('NOT_TESTED with no recorded previous status is fresh', () => {
+    expect(isFreshBreach({ status: 'NOT_TESTED', previousStatus: null })).toBe(true);
+  });
+
+  it('WAIVED -> FAIL is fresh', () => {
+    expect(isFreshBreach({ status: 'WAIVED', previousStatus: 'FAIL' })).toBe(true);
   });
 });

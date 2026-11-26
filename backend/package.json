@@ -2,7 +2,7 @@
   "name": "lumen-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Lumen Document Intelligence \u2014 REST API, document processing engine and background worker",
+  "description": "Lumen Document Intelligence — REST API, document processing engine and background worker",
   "engines": {
     "node": ">=20"
   },
@@ -36,6 +36,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.8.0",
+    "mathjs": "^14.9.1",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.14",
     "pdf-parse": "^1.1.1",

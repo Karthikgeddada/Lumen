@@ -35,6 +35,36 @@ router.post(
   }),
 );
 
+// Delete an entity (ADMIN-only, audit-logged — for cleaning up test entities).
+// Removes its observations and covenant definitions/results (cascade);
+// scheduled reports survive but are unlinked from the deleted entity.
+router.delete(
+  '/:workspaceId/analytics/entities/:entityId',
+  requireAuth,
+  requireWorkspace('ADMIN'),
+  asyncH(async (req, res) => {
+    const entity = await prisma.entity.findFirst({
+      where: { id: req.params.entityId, workspaceId: req.ws!.id },
+    });
+    if (!entity) throw new ApiError(404, 'NOT_FOUND', 'Entity not found.');
+
+    const [unlinked, observations] = await prisma.$transaction([
+      prisma.report.updateMany({ where: { entityId: entity.id }, data: { entityId: null } }),
+      prisma.metricObservation.deleteMany({ where: { entityId: entity.id } }),
+    ]);
+    await prisma.entity.delete({ where: { id: entity.id } }); // covenant definitions + results cascade
+    await audit({
+      workspaceId: req.ws!.id,
+      actorId: req.auth!.userId,
+      action: 'entity.deleted',
+      targetType: 'entity',
+      targetId: entity.id,
+      meta: { name: entity.name, observations: observations.count, reportsUnlinked: unlinked.count },
+    });
+    res.json({ ok: true, deleted: entity.name, observations: observations.count, reportsUnlinked: unlinked.count });
+  }),
+);
+
 // Overview — 4- or 8-quarter view with YoY deltas and segment series.
 router.get(
   '/:workspaceId/analytics/overview',

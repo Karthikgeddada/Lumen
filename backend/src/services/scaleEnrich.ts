@@ -27,7 +27,7 @@ export async function enrichResultsWithScale(taskId: string): Promise<void> {
     // page→text mapping from sections.
     const docIds = [...new Set(results.map((r) => r.documentId).filter((d): d is string => !!d))];
     interface DocCtx {
-      tables: { id: string; title: string | null; header: unknown; page: number | null; sheet: string | null }[];
+      tables: { id: string; title: string | null; header: unknown; page: number | null; sheet: string | null; contextAbove: unknown }[];
       pages: Map<number, string>;
       firstPage: number | null;
     }
@@ -36,7 +36,7 @@ export async function enrichResultsWithScale(taskId: string): Promise<void> {
       const [tables, sections] = await Promise.all([
         prisma.documentTable.findMany({
           where: { documentId: docId },
-          select: { id: true, title: true, header: true, page: true, sheet: true },
+          select: { id: true, title: true, header: true, page: true, sheet: true, contextAbove: true },
         }),
         prisma.documentSection.findMany({
           where: { documentId: docId },
@@ -74,7 +74,10 @@ export async function enrichResultsWithScale(taskId: string): Promise<void> {
         );
         if (t) {
           const headerText = Array.isArray(t.header) ? t.header.join(' ') : '';
-          const det = detectScaleInText(`${t.title ?? ''} ${headerText}`);
+          // contextAbove: the ~3 lines above a PDF table — where "(in
+          // thousands)" typically sits — now feed the table-level rule.
+          const ctxText = Array.isArray(t.contextAbove) ? (t.contextAbove as string[]).join(' ') : '';
+          const det = detectScaleInText(`${ctxText} ${t.title ?? ''} ${headerText}`);
           if (det) table = { ...det, from: 'table', page: t.page, sheet: t.sheet, tableId: t.id };
         }
       }

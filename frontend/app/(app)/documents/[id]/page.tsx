@@ -15,7 +15,7 @@ import {
 
 interface DocDetail {
   id: string; name: string; fileType: string; mimeType: string; sizeBytes: number;
-  pageCount: number | null; status: string; error: string | null; isDemo: boolean;
+  pageCount: number | null; status: string; error: string | null; isDemo: boolean; tablesUnavailable: boolean;
   uploadedAt: string; processedAt: string | null;
   collection: { id: string; name: string } | null;
   owner: { id: string; firstName: string; lastName: string } | null;
@@ -97,6 +97,11 @@ export default function DocumentViewer() {
           </div>
         </div>
         {downloadError ? <div className="badge badge-warning" style={{ marginTop: 8 }}>{downloadError}</div> : null}
+        {doc.tablesUnavailable ? (
+          <div className="badge badge-warning" style={{ marginTop: 8 }} title="PDF parsed without the table service — table detection, cell references and region highlights are unavailable. Retry processing after the parse service is back to restore them.">
+            ⚑ Tables unavailable — parsed without table detection
+          </div>
+        ) : null}
       </div>
 
       {doc.status === 'FAILED' ? (

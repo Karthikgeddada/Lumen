@@ -13,6 +13,54 @@ import { applyScaleResolution, scaleFlags, scaleUnresolved } from '../services/t
 
 const router = Router();
 
+// ── Validation rules (spec C1) — per-workspace config ────────────────
+// Component sums, balance-sheet identities and QoQ outliers, with per-rule
+// tolerances. Stored as WorkspaceSetting "validation.rules"; the extraction
+// runner reads it after scale enrichment and flags any figure that fails.
+const validationConfigSchema = z.object({
+  componentSums: z.array(z.object({
+    label: z.string().trim().max(80).optional(),
+    total: z.string().trim().min(1).max(60),
+    components: z.array(z.string().trim().min(1).max(60)).min(1).max(12),
+    tolerancePct: z.number().min(0).max(50).optional(),
+  })).max(20).optional(),
+  balanceSheets: z.array(z.object({
+    assets: z.string().trim().min(1).max(60),
+    liabilities: z.array(z.string().trim().min(1).max(60)).min(1).max(12),
+    equity: z.array(z.string().trim().min(1).max(60)).min(1).max(12),
+    tolerancePct: z.number().min(0).max(50).optional(),
+  })).max(10).optional(),
+  qoqOutlierPct: z.number().min(1).max(1000).nullable().optional(),
+});
+
+router.get(
+  '/workspaces/:workspaceId/validation',
+  requireAuth,
+  requireWorkspace('VIEWER'),
+  asyncH(async (req, res) => {
+    const setting = await prisma.workspaceSetting.findUnique({
+      where: { workspaceId_key: { workspaceId: req.ws!.id, key: 'validation.rules' } },
+    });
+    res.json({ rules: setting?.value ?? {} });
+  }),
+);
+
+router.put(
+  '/workspaces/:workspaceId/validation',
+  requireAuth,
+  requireWorkspace('EDITOR'),
+  asyncH(async (req, res) => {
+    const rules = validationConfigSchema.parse(req.body ?? {});
+    await prisma.workspaceSetting.upsert({
+      where: { workspaceId_key: { workspaceId: req.ws!.id, key: 'validation.rules' } },
+      create: { workspaceId: req.ws!.id, key: 'validation.rules', value: rules },
+      update: { value: rules },
+    });
+    await audit({ workspaceId: req.ws!.id, actorId: req.auth!.userId, action: 'validation.rules.updated', targetType: 'workspace', targetId: req.ws!.id });
+    res.json({ rules });
+  }),
+);
+
 // Templates (built-in + workspace custom)
 router.get(
   '/workspaces/:workspaceId/extractions/templates',
@@ -342,8 +390,8 @@ router.post(
       create: { workspaceId: task.workspaceId, name: task.name },
       update: {},
     });
-    const { created, refused } = await ingestFromExtraction(task.workspaceId, task.id);
-    res.json({ ok: true, entityId: entity.id, created, refused });
+    const { created, refused, conflicts } = await ingestFromExtraction(task.workspaceId, task.id);
+    res.json({ ok: true, entityId: entity.id, created, refused, conflicts });
   }),
 );
 

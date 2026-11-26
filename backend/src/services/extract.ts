@@ -1,8 +1,10 @@
 import { prisma } from '../prisma';
+import type { Prisma } from '@prisma/client';
 import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
 import { enrichResultsWithScale } from './scaleEnrich';
+import { runPostExtractionValidation } from './validationRun';
 
 // Structured field extraction, grounded in retrieved evidence. Every result
 // carries its confidence, source document, page/sheet/cell pointer and an
@@ -10,6 +12,16 @@ import { enrichResultsWithScale } from './scaleEnrich';
 // correctness — so results stay NEEDS_REVIEW until a human verifies them.
 
 export type FieldSpec = { key: string; label: string; type: string; description?: string };
+
+// First region bbox on the evidence chunk (PDF geometry) for the viewer.
+const evidenceBbox = (e: RetrievedChunk | null): object | null => {
+  if (!e?.regions) return null;
+  for (const r of e.regions as Record<string, unknown>[]) {
+    const b = r?.bbox as { x0: number; top: number; x1: number; bottom: number } | undefined;
+    if (b && typeof b.x0 === 'number' && typeof b.bottom === 'number') return b;
+  }
+  return null;
+};
 
 export async function runExtraction(taskId: string): Promise<void> {
   const task = await prisma.extractionTask.findUnique({
@@ -37,16 +49,22 @@ export async function runExtraction(taskId: string): Promise<void> {
       for (const documentId of documentIds) {
         const doc = await prisma.document.findFirst({
           where: { id: documentId, workspaceId: task.workspaceId, deletedAt: null, status: 'COMPLETED' },
-          select: { id: true, name: true },
+          select: { id: true, name: true, tablesUnavailable: true },
         });
         if (!doc) continue;
 
-        const chunks = await retrieve(
+        const retrieved = await retrieve(
           task.workspaceId,
           { documentIds: [documentId] },
           `${field.label} ${field.description ?? ''}`,
           6,
         );
+        // Numeric figures live in tables: table-row chunks are preferred as
+        // evidence (stable sort — original relevance order kept within groups).
+        const numeric = ['number', 'currency', 'percent'].includes(field.type);
+        const chunks = numeric
+          ? [...retrieved].sort((a, b) => (a.kind === 'TABLE_ROW' ? 0 : 1) - (b.kind === 'TABLE_ROW' ? 0 : 1))
+          : retrieved;
 
         let value: string | null = null;
         let unit: string | null = null;
@@ -78,8 +96,9 @@ export async function runExtraction(taskId: string): Promise<void> {
           }
         }
 
-        // A cell reference, when the evidence lives in a spreadsheet table row
-        const cellMatch = evidence?.text.match(/\(([A-Z]{1,3}\d{1,5})\)/);
+        // A cell reference, when the evidence lives in a table row — either a
+        // spreadsheet coordinate (B7) or a PDF cell ref (p3 t1 r5 c2).
+        const cellMatch = evidence?.text.match(/\(([A-Z]{1,3}\d{1,5}|p\d+ t\d+ r\d+ c\d+)\)/);
 
         await prisma.extractionResult.create({
           data: {
@@ -92,8 +111,12 @@ export async function runExtraction(taskId: string): Promise<void> {
             page: evidence?.page ?? null,
             sheet: evidence?.sheet ?? null,
             cell: cellMatch ? cellMatch[1] : null,
+            bbox: (evidenceBbox(evidence) as Prisma.InputJsonValue) ?? undefined,
             excerpt: evidence ? evidence.text.slice(0, 1200) : null,
             status: value != null && evidence ? 'NEEDS_REVIEW' : 'MISSING',
+            note: doc.tablesUnavailable
+              ? 'Table parsing was unavailable for this document (parse service unreachable at upload time) — figures may come from prose text without table context.'
+              : null,
           },
         });
       }
@@ -102,6 +125,12 @@ export async function runExtraction(taskId: string): Promise<void> {
     // Detect unit scales from document/table/page headers and annotate every
     // result with provenance + review flags before the human sees the queue.
     await enrichResultsWithScale(taskId);
+    // Spec C1: post-extraction validation (component sums, balance-sheet
+    // identity, unit/scale consistency, QoQ outliers) — flags land as notes
+    // + flagged, so the review trust rule forces human ownership.
+    await runPostExtractionValidation(task.workspaceId, taskId).catch((e) =>
+      logger.warn({ err: String(e), taskId }, 'post-extraction validation skipped'),
+    );
 
     await prisma.extractionTask.update({
       where: { id: taskId },
