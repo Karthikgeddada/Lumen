@@ -1,9 +1,18 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
 import { sendCovenantBreachEmail } from './mailer';
 import { evaluateCovenant, isFreshBreach } from './trust';
+import {
+  evaluateFormulaCovenant,
+  computeNearBreach,
+  resolveThreshold,
+  CovenantTerms,
+  ScheduleStep,
+  NearBreachInfo,
+} from './ttm';
 
 // Covenant intelligence: extract covenant definitions from credit agreements
 // (grounded in the actual clauses), then test each quarter's observed metrics
@@ -134,8 +143,9 @@ Rules:
 export async function runCovenantTests(workspaceId: string, entityId: string, period?: string) {
   const definitions = await prisma.covenantDefinition.findMany({
     where: { workspaceId, entityId, deletedAt: null },
+    orderBy: { createdAt: 'asc' }, // formula covenants recompute in definition order — dependencies first
   });
-  if (definitions.length === 0) return { tested: 0, passed: 0, failed: 0, notTested: 0, results: [] };
+  if (definitions.length === 0) return { tested: 0, passed: 0, failed: 0, notTested: 0, nearBreached: 0, results: [] };
 
   // Latest observed period for this entity when none given.
   let targetPeriod = period;
@@ -145,7 +155,7 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
       orderBy: { createdAt: 'desc' },
       select: { period: true },
     });
-    if (!latest) return { tested: 0, passed: 0, failed: 0, notTested: 0, results: [] };
+    if (!latest) return { tested: 0, passed: 0, failed: 0, notTested: 0, nearBreached: 0, results: [] };
     targetPeriod = latest.period;
   }
 
@@ -153,6 +163,83 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
     where: { entityId },
     select: { id: true, metricKey: true, period: true, value: true, unit: true, derivation: true, scale: true },
   });
+
+  // ── C6: recompute CALCULATED observations BEFORE the retest ──────────
+  // Every formula covenant is re-evaluated for the target period and its
+  // value stored as a CALCULATED MetricObservation with full input lineage
+  // (periods + observation ids). Inputs that just landed are included; any
+  // unresolved input scale flag is inherited by the calculated figure
+  // (stored in `scale`, so the trust rule keeps blocking it downstream).
+  // Definition order (createdAt asc) lets a formula consume another formula's
+  // calculated output when its provider is defined first.
+  const formulaOutcome = new Map<
+    string,
+    ReturnType<typeof evaluateFormulaCovenant> & { observationId: string | null }
+  >();
+  for (const def of definitions) {
+    if (!def.formula) continue;
+    const terms = (def.terms as CovenantTerms | null) ?? null;
+    const outcome = evaluateFormulaCovenant(
+      {
+        comparator: def.comparator,
+        threshold: def.threshold,
+        period: def.period === 'ttm' ? 'ttm' : 'quarter',
+        formula: def.formula,
+        terms,
+        schedule: def.schedule as ScheduleStep[] | null,
+        nearBreachPct: def.nearBreachPct,
+      },
+      observations,
+      targetPeriod,
+    );
+    if (outcome.value == null) {
+      // No computed value (missing/unresolved inputs, bad formula) — nothing
+      // to store as a metric; the NOT_TESTED result below carries the reason.
+      formulaOutcome.set(def.id, { ...outcome, observationId: null });
+      continue;
+    }
+    const inheritsUnresolved =
+      outcome.status === 'NOT_TESTED' && (outcome.reason?.includes('Unresolved scale flags') ?? false);
+    const calcScale: Prisma.InputJsonValue = {
+      calculated: true,
+      unresolved: inheritsUnresolved,
+      ...(inheritsUnresolved ? { flags: ['input scale unresolved — see lineage'] } : {}),
+    };
+    const obs = await prisma.metricObservation.upsert({
+      where: { entityId_metricKey_period: { entityId, metricKey: def.key, period: targetPeriod } },
+      create: {
+        entityId,
+        metricKey: def.key,
+        label: def.label,
+        period: targetPeriod,
+        value: outcome.value,
+        unit: def.unit,
+        derivation: 'CALCULATED',
+        scale: calcScale,
+        inputs: outcome.lineage as unknown as Prisma.InputJsonValue,
+      },
+      update: {
+        value: outcome.value,
+        unit: def.unit,
+        derivation: 'CALCULATED',
+        scale: calcScale,
+        inputs: outcome.lineage as unknown as Prisma.InputJsonValue,
+      },
+    });
+    // Make the fresh value visible to later definitions in this same run
+    // (dependent formulas) and to the evaluation loop below.
+    observations.push({
+      id: obs.id,
+      metricKey: def.key,
+      period: targetPeriod,
+      value: outcome.value,
+      unit: def.unit,
+      derivation: 'CALCULATED',
+      scale: calcScale as unknown as Prisma.JsonValue,
+    });
+    formulaOutcome.set(def.id, { ...outcome, observationId: obs.id });
+  }
+
   const byMetric = new Map(
     observations.filter((o) => o.period === targetPeriod).map((o) => [o.metricKey, o]),
   );
@@ -160,21 +247,53 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
   let passed = 0;
   let failed = 0;
   let freshBreaches = 0; // FAIL now but not FAIL before — avoids re-alerting known breaches
+  let freshNearBreaches = 0; // entering the near-breach band — not repeated while it stays inside
   let notTested = 0;
-  const results: { definitionId: string; key: string; label: string; status: string; value: number | null; headroom: number | null; reason: string | null }[] = [];
+  let nearBreached = 0;
+  const results: { definitionId: string; key: string; label: string; status: string; value: number | null; headroom: number | null; headroomPct: number | null; reason: string | null; nearBreach: boolean }[] = [];
+
+  const isFreshNearBreach = (previous: { nearBreach: unknown } | null | undefined): boolean =>
+    !previous || !((previous.nearBreach as NearBreachInfo | null)?.withinPct);
 
   for (const def of definitions) {
-    const obs = byMetric.get(def.metricKey);
+    // Formula covenant: the engine outcome from the recompute stage above.
+    let status: 'PASS' | 'FAIL' | 'NOT_TESTED';
+    let value: number | null;
+    let headroom: number | null;
+    let reason: string | null;
+    let nearBreach: NearBreachInfo | null;
+    let observationId: string | null;
 
-    // TRUST RULE: a covenant whose backing observation carries unresolved
-    // scale flags is NOT_TESTED with a reason — never a PASS or FAIL built
-    // on an untrusted figure (pure logic in services/trust.ts, unit-tested).
-    const { status, value, headroom, reason } = evaluateCovenant(def, obs);
-    const observationId: string | null = obs?.id ?? null;
+    if (def.formula) {
+      const outcome = formulaOutcome.get(def.id)!;
+      status = outcome.status;
+      value = outcome.value;
+      headroom = outcome.headroom;
+      reason = outcome.reason;
+      nearBreach = outcome.nearBreach;
+      observationId = outcome.observationId;
+    } else {
+      // Single-metric covenant — the unchanged pre-formula path, plus
+      // schedule step-downs and the near-breach band when configured.
+      const threshold = resolveThreshold(def.threshold, def.schedule as ScheduleStep[] | null, targetPeriod);
+      const obs = byMetric.get(def.metricKey);
+
+      // TRUST RULE: a covenant whose backing observation carries unresolved
+      // scale flags is NOT_TESTED with a reason — never a PASS or FAIL built
+      // on an untrusted figure (pure logic in services/trust.ts, unit-tested).
+      const evaluation = evaluateCovenant({ comparator: def.comparator, threshold, metricKey: def.metricKey }, obs);
+      status = evaluation.status;
+      value = evaluation.value;
+      headroom = evaluation.headroom;
+      reason = evaluation.reason;
+      nearBreach =
+        value != null ? computeNearBreach(def.comparator, threshold, value, def.nearBreachPct) : null;
+      observationId = obs?.id ?? null;
+    }
 
     const previous = await prisma.covenantResult.findFirst({
       where: { definitionId: def.id, period: targetPeriod },
-      select: { id: true, status: true, previousStatus: true },
+      select: { id: true, status: true, previousStatus: true, nearBreach: true },
     });
 
     if (status === 'PASS') passed++;
@@ -186,6 +305,11 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
     }
     else notTested++;
 
+    if (nearBreach?.withinPct) {
+      nearBreached++;
+      if (isFreshNearBreach(previous)) freshNearBreaches++;
+    }
+
     await prisma.covenantResult.upsert({
       where: { definitionId_period: { definitionId: def.id, period: targetPeriod } },
       create: {
@@ -196,6 +320,7 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
         headroom,
         observationId,
         reason,
+        ...(nearBreach ? { nearBreach: nearBreach as unknown as Prisma.InputJsonValue } : {}),
       },
       update: {
         value,
@@ -204,11 +329,16 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
         observationId,
         reason,
         previousStatus: previous?.status ?? null, // what this result was before this run
+        ...(nearBreach ? { nearBreach: nearBreach as unknown as Prisma.InputJsonValue } : {}),
         computedAt: new Date(),
       },
     });
 
-    results.push({ definitionId: def.id, key: def.key, label: def.label, status, value, headroom, reason });
+    results.push({
+      definitionId: def.id, key: def.key, label: def.label, status, value, headroom,
+      headroomPct: nearBreach?.headroomPct ?? null, reason,
+      nearBreach: nearBreach?.withinPct ?? false,
+    });
   }
 
   // Alert every active member of the workspace — but only on FRESH breaches,
@@ -246,5 +376,26 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
     );
   }
 
-  return { tested: passed + failed, passed, failed, notTested, period: targetPeriod, results };
+  // Near-breach band notifications — FRESH events only (entering the band),
+  // same freshness discipline as breaches. No email (mailer keeps breach-only).
+  if (freshNearBreaches > 0) {
+    const members = await prisma.membership.findMany({
+      where: { workspaceId, deletedAt: null },
+      select: { userId: true },
+    });
+    const entity = await prisma.entity.findUnique({ where: { id: entityId }, select: { name: true } });
+    const data = members.map((m) => ({
+      userId: m.userId,
+      workspaceId,
+      kind: 'covenant.near_breach',
+      title: `${freshNearBreaches} covenant${freshNearBreaches === 1 ? '' : 's'} near breach`,
+      body: `${entity?.name ?? 'Entity'} — ${targetPeriod}: ${freshNearBreaches} covenant${freshNearBreaches === 1 ? '' : 's'} within the near-breach band (${nearBreached} total in band, ${failed} failing).`,
+      link: '/covenants',
+    }));
+    if (data.length) {
+      await prisma.notification.createMany({ data }).catch((err) => logger.error({ err }, 'near-breach notification failed'));
+    }
+  }
+
+  return { tested: passed + failed, passed, failed, notTested, nearBreached, period: targetPeriod, results };
 }

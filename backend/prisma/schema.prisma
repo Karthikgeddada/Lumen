@@ -606,6 +606,7 @@ model MetricObservation {
   sourcePage        Int?
   sourceExcerpt     String?    @db.Text
   scale             Json?      // unit-scale provenance carried over from the reviewed extraction result
+  inputs            Json?      // CALCULATED lineage: [{key, metricKey, kind, periods, observationIds, value}]
   extractionResultId String?
   createdAt         DateTime   @default(now())
 
@@ -668,6 +669,11 @@ model CovenantDefinition {
   threshold    Float
   unit         String              @default("x") // x | % | USD | days
   period       String              @default("quarter") // quarter | ttm
+  formula      String?             // e.g. "(debt - cash) / ebitda" — null = single-metric covenant, unchanged behavior
+  terms        Json?               // formula inputs: {inputs: [{key, metricKey, kind: flow|stock|ratio}], where?}
+  schedule     Json?               // step-downs: [{effectiveFrom: "Q1 2026", threshold: 3.5}]
+  cure         Json?               // recorded cure events (display only — never auto-applied)
+  nearBreachPct Float?             // e.g. 15 = alert when headroom ≤ 15% of threshold
   sourceExcerpt String?            @db.Text
   sourcePage   Int?
   confidence   Float               @default(0)
@@ -698,6 +704,7 @@ model CovenantResult {
   headroom     Float?               // signed distance to threshold; positive = compliant
   observationId String?             // MetricObservation backing the value
   reason       String?              // why NOT_TESTED (e.g. unresolved scale flags on the observation)
+  nearBreach   Json?                // {withinPct, headroomPct, nearBreachPct} when the definition sets a near-breach band
   previousStatus CovenantResultStatus? // status before the latest evaluation — NOT_TESTED can mask the last real one
   computedAt   DateTime             @default(now())
 

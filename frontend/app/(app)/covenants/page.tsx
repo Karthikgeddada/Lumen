@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import {
-  Scale, Plus, FileSearch, Play, Trash2, ShieldCheck, ShieldAlert, FileText, Building2, History,
+  Scale, Plus, FileSearch, Play, Trash2, ShieldCheck, ShieldAlert, FileText, Building2, History, Sigma, ClipboardList,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
@@ -11,9 +11,13 @@ import { EmptyState, Field, LoadingBlock, Modal } from '../../../components/ui';
 
 interface Entity { id: string; name: string; _count: { observations: number; reports: number } }
 interface Doc { id: string; name: string; status: string }
+type TermInput = { key: string; metricKey: string; kind: 'flow' | 'stock' | 'ratio' };
+type CureEvent = { at: string; byName: string | null; period: string | null; note: string };
+
 interface CovenantResult {
   id: string; period: string; value: number | null; status: 'PASS' | 'FAIL' | 'NOT_TESTED' | 'WAIVED';
   headroom: number | null; computedAt: string; reason: string | null; previousStatus: string | null;
+  nearBreach: { headroom: number; headroomPct: number | null; withinPct: boolean } | null;
 }
 interface CovenantDefinition {
   id: string; key: string; label: string; description: string | null;
@@ -22,6 +26,11 @@ interface CovenantDefinition {
   confidence: number; status: 'AI_INFERRED' | 'REVIEWED';
   entity: { id: string; name: string };
   document: { id: string; name: string } | null;
+  formula: string | null;
+  terms: { inputs: TermInput[]; where: string | null } | null;
+  schedule: { effectiveFrom: string; threshold: number }[] | null;
+  nearBreachPct: number | null;
+  cure: { events?: CureEvent[] } | null;
   results: CovenantResult[]; // newest first
 }
 
@@ -125,11 +134,25 @@ export default function Covenants() {
                 return (
                   <tr key={d.id}>
                     <td className="strong">{d.label}{!entityId && entData?.entities?.length ? <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>{d.entity.name}</span> : null}</td>
-                    <td className="mono" style={{ fontSize: 12.5 }}>{d.metricKey} {cmp} {d.threshold}{d.unit}</td>
+                    <td className="mono" style={{ fontSize: 12.5 }}>
+                      {d.formula ? (
+                        <span title={`Formula covenant — inputs feed it from observed metrics`}>
+                          <Sigma size={11} style={{ verticalAlign: -1, color: 'var(--text-muted)' }} /> {d.formula} {cmp} {d.threshold}{d.unit}
+                        </span>
+                      ) : (
+                        <>{d.metricKey} {cmp} {d.threshold}{d.unit}</>
+                      )}
+                      {d.nearBreachPct != null ? (
+                        <span style={{ color: '#9a6700' }}> · alert within {d.nearBreachPct}%</span>
+                      ) : null}
+                    </td>
                     <td>
                       {l ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                           {statusBadge(l.status)}
+                          {l.nearBreach?.withinPct ? (
+                            <span className="badge" style={{ background: 'rgba(154, 103, 0, 0.12)', color: '#9a6700' }}>Near breach</span>
+                          ) : null}
                           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{l.period}: {l.value ?? '—'}{l.headroom != null ? ` · ${l.headroom >= 0 ? '+' : ''}${l.headroom.toFixed(2)}${d.unit} headroom` : ''}</span>
                           {l.reason ? <span style={{ fontSize: 11.5, color: '#9a6700' }}>⚑ {l.reason}</span> : null}
                           {l.status === 'NOT_TESTED' && l.previousStatus && l.previousStatus !== 'NOT_TESTED' ? (
@@ -271,7 +294,8 @@ function DefineModal({ open, onClose, wid, entities, defaultEntity, onDone }: {
   open: boolean; onClose: () => void; wid?: string; entities: Entity[];
   defaultEntity: string | null; onDone: () => void;
 }) {
-  const [form, setForm] = useState({ entityId: '', key: '', label: '', metricKey: '', comparator: 'LTE' as 'LTE' | 'GTE', threshold: '', unit: 'x' });
+  const [form, setForm] = useState({ entityId: '', key: '', label: '', metricKey: '', comparator: 'LTE' as 'LTE' | 'GTE', threshold: '', unit: 'x', formula: '', nearBreachPct: '' });
+  const [inputs, setInputs] = useState<TermInput[]>([{ key: '', metricKey: '', kind: 'flow' }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const entityId = form.entityId || defaultEntity || '';
@@ -279,9 +303,15 @@ function DefineModal({ open, onClose, wid, entities, defaultEntity, onDone }: {
   async function run() {
     setBusy(true); setErr(null);
     try {
+      const validInputs = inputs.filter((t) => t.key.trim() && t.metricKey.trim());
       await api(`/api/workspaces/${wid}/covenants`, {
         method: 'POST',
-        body: { ...form, entityId, threshold: parseFloat(form.threshold) },
+        body: {
+          ...form, entityId, threshold: parseFloat(form.threshold),
+          formula: form.formula.trim() || null,
+          ...(form.formula.trim() ? { terms: { inputs: validInputs } } : {}),
+          ...(form.nearBreachPct !== '' ? { nearBreachPct: parseFloat(form.nearBreachPct) } : {}),
+        },
       });
       onDone();
     } catch (e) {
@@ -312,6 +342,20 @@ function DefineModal({ open, onClose, wid, entities, defaultEntity, onDone }: {
         <Field label="Threshold"><input className="input mono" type="number" step="any" value={form.threshold} placeholder="4.5" onChange={(e) => setForm({ ...form, threshold: e.target.value })} /></Field>
         <Field label="Unit"><input className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></Field>
       </div>
+      <Field label="Formula (optional — leave empty for a single-metric covenant)">
+        <input className="input mono" placeholder="(debt - cash) / ebitda" value={form.formula} onChange={(e) => setForm({ ...form, formula: e.target.value })} />
+      </Field>
+      {form.formula.trim() ? (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 6px' }}>
+            Inputs — flow metrics sum the last 4 consecutive quarters (TTM); stock/ratio use the period-end value. Allowed functions: min, max, abs, sum, round.
+          </div>
+          <FormulaInputs inputs={inputs} setInputs={setInputs} />
+        </div>
+      ) : null}
+      <Field label="Near-breach alert band % (optional)">
+        <input className="input mono" type="number" min={0} max={100} step="any" placeholder="15" style={{ width: 140 }} value={form.nearBreachPct} onChange={(e) => setForm({ ...form, nearBreachPct: e.target.value })} />
+      </Field>
       {err ? <div className="form-error">{err}</div> : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
         <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
@@ -382,16 +426,48 @@ function TestModal({ open, onClose, wid, entities, defaultEntity, periods, onDon
   );
 }
 
+// Formula input-term editor — shared by Define and Review modals.
+function FormulaInputs({ inputs, setInputs }: { inputs: TermInput[]; setInputs: (v: TermInput[]) => void }) {
+  const set = (i: number, patch: Partial<TermInput>) =>
+    setInputs(inputs.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      {inputs.map((t, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr 1fr auto', gap: 6 }}>
+          <input className="input mono" placeholder="name (debt)" value={t.key} onChange={(e) => set(i, { key: e.target.value })} />
+          <input className="input mono" placeholder="metric key (total_debt)" value={t.metricKey} onChange={(e) => set(i, { metricKey: e.target.value })} />
+          <select className="input" value={t.kind} onChange={(e) => set(i, { kind: e.target.value as TermInput['kind'] })}>
+            <option value="flow">flow (quarterly)</option>
+            <option value="stock">stock (period-end)</option>
+            <option value="ratio">ratio</option>
+          </select>
+          <button className="btn btn-ghost btn-sm" onClick={() => setInputs(inputs.filter((_, idx) => idx !== i))}>Remove</button>
+        </div>
+      ))}
+      <button className="btn btn-secondary btn-sm" style={{ justifySelf: 'start' }}
+        onClick={() => setInputs([...inputs, { key: '', metricKey: '', kind: 'flow' }])}>+ Add input</button>
+    </div>
+  );
+}
+
 function ReviewModal({ def, wid, onClose, onDone }: {
   def: CovenantDefinition; wid?: string; onClose: () => void; onDone: () => void;
 }) {
   const [form, setForm] = useState({
     label: def.label, metricKey: def.metricKey, comparator: def.comparator,
     threshold: String(def.threshold), unit: def.unit,
+    formula: def.formula ?? '',
+    nearBreachPct: def.nearBreachPct != null ? String(def.nearBreachPct) : '',
   });
+  const [inputs, setInputs] = useState<TermInput[]>(
+    def.terms?.inputs?.length ? def.terms.inputs : [{ key: '', metricKey: '', kind: 'flow' }],
+  );
+  const [cureNote, setCureNote] = useState('');
+  const [curePeriod, setCurePeriod] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const reviewed = def.status === 'REVIEWED';
+  const validInputs = inputs.filter((t) => t.key.trim() && t.metricKey.trim());
 
   async function save(status?: 'REVIEWED') {
     setBusy(true); setErr(null);
@@ -401,12 +477,31 @@ function ReviewModal({ def, wid, onClose, onDone }: {
         body: {
           label: form.label, metricKey: form.metricKey, comparator: form.comparator,
           threshold: parseFloat(form.threshold), unit: form.unit,
+          formula: form.formula.trim() || null,
+          ...(form.formula.trim() ? { terms: { inputs: validInputs } } : { terms: null }),
+          ...(form.nearBreachPct !== '' ? { nearBreachPct: parseFloat(form.nearBreachPct) } : { nearBreachPct: null }),
           ...(status ? { status } : {}),
         },
       });
       onDone();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not save.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Cure events are display-only context — never auto-applied to a result.
+  async function recordCure() {
+    setBusy(true); setErr(null);
+    try {
+      await api(`/api/covenants/${def.id}/cure`, {
+        method: 'POST',
+        body: { note: cureNote.trim(), ...(curePeriod.trim() ? { period: curePeriod.trim() } : {}) },
+      });
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not record cure.');
     } finally {
       setBusy(false);
     }
@@ -436,6 +531,46 @@ function ReviewModal({ def, wid, onClose, onDone }: {
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 10 }}>
           <Field label="Threshold"><input className="input mono" type="number" step="any" value={form.threshold} onChange={(e) => setForm({ ...form, threshold: e.target.value })} /></Field>
           <Field label="Unit"><input className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></Field>
+        </div>
+      </div>
+      <Field label="Formula (optional)">
+        <input className="input mono" placeholder="(debt - cash) / ebitda" value={form.formula} onChange={(e) => setForm({ ...form, formula: e.target.value })} />
+      </Field>
+      {form.formula.trim() ? (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 6px' }}>
+            Inputs — flow metrics sum the last 4 consecutive quarters (TTM); stock/ratio use the period-end value. Allowed functions: min, max, abs, sum, round.
+          </div>
+          <FormulaInputs inputs={inputs} setInputs={setInputs} />
+        </div>
+      ) : null}
+      <Field label="Near-breach alert band % (optional)">
+        <input className="input mono" type="number" min={0} max={100} step="any" placeholder="15" style={{ width: 140 }} value={form.nearBreachPct} onChange={(e) => setForm({ ...form, nearBreachPct: e.target.value })} />
+      </Field>
+      {def.schedule?.length ? (
+        <div className="card" style={{ padding: '10px 12px', background: 'var(--sunken)', fontSize: 12.5, marginBottom: 10 }}>
+          <strong>Step-down schedule</strong> — base {def.threshold}
+          {def.unit}: {def.schedule.map((s) => `${s.effectiveFrom} → ${s.threshold}`).join(', ')}
+        </div>
+      ) : null}
+      <div className="card" style={{ padding: '10px 12px', background: 'var(--sunken)', marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+          <ClipboardList size={12} style={{ verticalAlign: -2 }} /> Cure history (display only — never auto-applied to a result)
+        </div>
+        {(def.cure?.events ?? []).length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No cures recorded.</div>
+        ) : (
+          (def.cure!.events ?? []).slice().reverse().map((e, i) => (
+            <div key={i} style={{ fontSize: 12, marginBottom: 4 }}>
+              <strong>{e.period ?? new Date(e.at).toLocaleDateString()}</strong> — {e.note}
+              {e.byName ? <span style={{ color: 'var(--text-muted)' }}> · {e.byName}</span> : null}
+            </div>
+          ))
+        )}
+        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+          <input className="input" placeholder="Cure note (e.g. equity cure of $2M)" value={cureNote} onChange={(e) => setCureNote(e.target.value)} />
+          <input className="input mono" style={{ width: 100 }} placeholder="Q3 2026" value={curePeriod} onChange={(e) => setCurePeriod(e.target.value)} />
+          <button className="btn btn-secondary" disabled={busy || !cureNote.trim()} onClick={recordCure}>Record</button>
         </div>
       </div>
       {err ? <div className="form-error">{err}</div> : null}

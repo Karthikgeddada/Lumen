@@ -18,13 +18,13 @@ Update after every item; commit + push each time. On restart: resume the first u
 - [x] B5 Extraction prefers table-row chunks (numeric fields, stable sort); records cell ref + bbox; scaleEnrich uses contextAbove.
 
 ## C. Validation, formulas, TTM, calculated metrics
-- [ ] C1 Post-extraction validation per figure (component sums, balance-sheet balance, unit/scale consistency, QoQ outliers; configurable).
-- [ ] C2 mathjs strict sandbox (parse-only, + - * / ^ min max abs sum round, ≤500 chars, node limit, numeric scope; injection tests).
-- [ ] C3 CovenantDefinition additive columns: formula, terms, schedule, cure, nearBreachPct (null formula = unchanged behavior).
-- [ ] C4 TRUE TTM (flow sum 4 consecutive quarters; stock period-end; ratio after aggregation; gaps → NOT_TESTED); explicit period parser.
-- [ ] C5 CovenantResult.nearBreach additive; fresh-event-only alerts.
-- [ ] C6 Calculated metrics → MetricObservation CALCULATED + inputs lineage; recompute before covenant retest; inherit unresolved.
-- [ ] C7 Tests: TTM gaps/boundaries, stock vs flow, step-downs, near-breach, injection, trust propagation, retest ordering.
+- [x] C1 Post-extraction validation per figure (component sums, balance-sheet balance, unit/scale consistency, QoQ outliers; configurable).
+- [x] C2 mathjs strict sandbox (parse-only, + - * / ^ min max abs sum round, ≤500 chars, node limit, numeric scope; injection tests).
+- [x] C3 CovenantDefinition additive columns: formula, terms, schedule, cure, nearBreachPct (null formula = unchanged behavior).
+- [x] C4 TRUE TTM (flow sum 4 consecutive quarters; stock period-end; ratio after aggregation; gaps → NOT_TESTED); explicit period parser.
+- [x] C5 CovenantResult.nearBreach additive; fresh-event-only alerts.
+- [x] C6 Calculated metrics → MetricObservation CALCULATED + inputs lineage; recompute before covenant retest; inherit unresolved.
+- [x] C7 Tests: TTM gaps/boundaries, stock vs flow, step-downs, near-breach, injection, trust propagation, retest ordering.
 
 ## D. Accuracy measurement
 - [ ] D1 backend/golden/ 8-10 fixtures w/ hand-verified expected values (page + location).

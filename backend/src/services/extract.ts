@@ -4,6 +4,7 @@ import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
 import { enrichResultsWithScale } from './scaleEnrich';
+import { runPostExtractionValidation } from './validationRun';
 
 // Structured field extraction, grounded in retrieved evidence. Every result
 // carries its confidence, source document, page/sheet/cell pointer and an
@@ -124,6 +125,12 @@ export async function runExtraction(taskId: string): Promise<void> {
     // Detect unit scales from document/table/page headers and annotate every
     // result with provenance + review flags before the human sees the queue.
     await enrichResultsWithScale(taskId);
+    // Spec C1: post-extraction validation (component sums, balance-sheet
+    // identity, unit/scale consistency, QoQ outliers) — flags land as notes
+    // + flagged, so the review trust rule forces human ownership.
+    await runPostExtractionValidation(task.workspaceId, taskId).catch((e) =>
+      logger.warn({ err: String(e), taskId }, 'post-extraction validation skipped'),
+    );
 
     await prisma.extractionTask.update({
       where: { id: taskId },
