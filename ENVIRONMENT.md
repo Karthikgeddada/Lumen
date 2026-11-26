@@ -26,6 +26,9 @@ Copy the `.env.example` in each package to `.env` (backend) / `.env.local` (fron
 | `STORAGE_REGION` / `STORAGE_BUCKET` | yes (prod) | Bucket region and name for document storage. |
 | `STORAGE_ACCESS_KEY` / `STORAGE_SECRET_KEY` | yes (prod) | Bucket credentials with put/get/delete on the bucket. |
 | `MAX_UPLOAD_MB` | optional | Max upload size (default 500). |
+| `PARSE_SERVICE_URL` | optional | Base URL of the Python parsing sidecar (`python-pipelines/` — pdfplumber reconstructs PDF financial tables, python-docx true body order, openpyxl values+formulas). Unset = JS parsers only (PDF tables stay flat text). Set it after deploying the `lumen-pipelines` service from render.yaml. |
+| `PIPELINES_TOKEN` | optional | Shared secret the sidecar requires (`X-Pipeline-Token` header); copy the value Render generates for the pipelines service. |
+| `PARSE_TIMEOUT_MS` | optional | Abort timeout for sidecar parse calls, in milliseconds (default 120000 — covers the free tier's ~50 s cold start). On timeout the worker falls back to the JS parsers and logs the reason. |
 
 ## Frontend (`frontend/.env.local`)
 

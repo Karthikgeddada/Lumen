@@ -3,6 +3,8 @@ import path from 'path';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
+import { logger } from '../logger';
+import { parseViaSidecar, sidecarEnv, sidecarSupported } from './pipelineClient';
 
 // Parsers for each supported format. Everything preserves provenance:
 // pages for PDFs, headings/paragraphs/footnotes for text documents, and
@@ -93,7 +95,10 @@ async function parsePdf(filePath: string): Promise<ParsedDoc> {
     pageCount: data.numpages ?? pages.length,
     ocrRequired: totalChars < pages.length * 20, // effectively no text layer
     sections,
-    tables: [], // pdf-parse has no table detector — PDF tables remain as paragraph text; see ENVIRONMENT/README notes
+    // Fallback only: pdf-parse has no table detector. When the Python
+    // sidecar (PARSE_SERVICE_URL) is configured, PDF tables are extracted
+    // by pdfplumber before this parser is ever reached.
+    tables: [],
   };
 }
 
@@ -204,6 +209,16 @@ function parseTxt(buffer: Buffer): ParsedDoc {
 
 // ── Dispatch ────────────────────────────────────────────────────────────
 export async function parseDocument(filePath: string, ext: string, baseName: string): Promise<ParsedDoc> {
+  // Python sidecar first (pdfplumber PDF tables, true DOCX body order,
+  // openpyxl values + formulas). Any failure falls back to the JS parsers
+  // below — logged with the reason, so a stuck sidecar is never a mystery
+  // and uploads never fail because of it.
+  const env = sidecarEnv();
+  if (env && sidecarSupported(ext)) {
+    const outcome = await parseViaSidecar(env, fs.readFileSync(filePath), `${baseName}.${ext}`);
+    if (outcome.ok) return outcome.doc;
+    logger.warn({ ext, reason: outcome.reason }, 'parse sidecar unavailable — using JS parsers');
+  }
   switch (ext) {
     case 'pdf':
       return parsePdf(filePath);
