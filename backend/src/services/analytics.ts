@@ -1,5 +1,6 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
-import { parseNumericValue } from './normalizer';
+import { parseNumericValueDetailed } from './normalizer';
 import { runCovenantTests } from './covenants';
 
 // Analytics are derived from actual stored data — extraction results and
@@ -109,9 +110,21 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
   let created = 0;
   const affectedPeriods = new Set<string>();
   for (const r of task.results) {
-    // Real parsing: "4.82 billion" → 4.82e9, "(1,234)" → -1234 — not naive digit-stripping.
-    const numeric = parseNumericValue(r.value, r.unit);
-    if (numeric == null || !r.document) continue;
+    // Scale-aware parsing: parseNumericValueDetailed reports whether the value
+    // itself ("4.82 billion") or the unit ("millions") already carried scale;
+    // the reviewed result's scale decision (from enrichment) supplies any
+    // header scale (table > page > document), applied exactly once.
+    const detail = parseNumericValueDetailed(r.value, r.unit);
+    if (!detail || !r.document) continue;
+    const scaleInfo =
+      (r.scale as {
+        multiplier: number | null;
+        appliedFrom: string | null;
+        flags: string[];
+        provenance: { label: string | null; headerText: string | null; from: string } | null;
+      } | null) ?? null;
+    const numeric = scaleInfo?.multiplier != null ? detail.value * scaleInfo.multiplier : detail.value;
+    if (!Number.isFinite(numeric)) continue;
 
     const period = r.document.name.match(/(Q[1-4]\s?\d{4}|\d{4})/i)?.[0]?.replace(/\s/, ' ') ?? null;
     if (!period) continue;
@@ -136,14 +149,17 @@ export async function ingestFromExtraction(workspaceId: string, taskId: string):
         sourceDocumentId: r.documentId,
         sourcePage: r.page,
         sourceExcerpt: r.excerpt,
+        scale: scaleInfo ?? Prisma.JsonNull,
         extractionResultId: r.id,
       },
       update: {
         value: numeric,
+        unit: r.unit ?? '',
         confidence: r.confidence,
         sourceDocumentId: r.documentId,
         sourcePage: r.page,
         sourceExcerpt: r.excerpt,
+        scale: scaleInfo ?? Prisma.JsonNull,
         extractionResultId: r.id,
       },
     });

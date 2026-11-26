@@ -95,3 +95,74 @@ export function parseNumericValue(raw: string | null | undefined, unit?: string 
   if (multiplier) n *= multiplier;
   return found.negative ? -n : n;
 }
+
+// ── Detailed parse for scale-aware ingestion ─────────────────────────────
+
+export interface NormalizedDetail {
+  value: number;
+  /** True when the value's own text carried the scale ("4.82 billion"). */
+  suffixApplied: boolean;
+  /** True when the extractor's unit field carried the scale ("millions"). */
+  unitApplied: boolean;
+  /** Ratios, multiples, percentages and per-share figures — never scaled. */
+  nonScalable: boolean;
+  nonScalableReason: string | null;
+}
+
+/** Detect figures that must never receive a header scale: multiples (4.5x),
+ *  percentages (38.2%, pct), and per-share amounts (EPS 2.14, "/share"). */
+function detectNonScalable(
+  raw: string,
+  unit: string | null | undefined,
+  attached: string,
+): { nonScalable: boolean; reason: string | null } {
+  const u = (unit ?? '').toLowerCase();
+  const t = raw.toLowerCase();
+  if (
+    /%/.test(t) ||
+    /percent|^pct|\bpct\b/.test(u) ||
+    /percent/.test(t)
+  ) return { nonScalable: true, reason: 'percentage' };
+  const isX = /^(x|times)$/i.test(attached) || /^x$/.test(u) || /multiple/i.test(u);
+  if (isX) return { nonScalable: true, reason: 'multiple/ratio' };
+  if (
+    /per\s*share|\/\s*share|\beps\b/.test(t) ||
+    /per\s*share|\/\s*share|\beps\b/.test(u)
+  ) return { nonScalable: true, reason: 'per-share' };
+  return { nonScalable: false, reason: null };
+}
+
+/** Full parse: the number plus WHICH precedence source (if any) already
+ *  applied a scale, and whether the figure is exempt from header scaling.
+ *  The header-scale resolution in scale.ts consumes this. */
+export function parseNumericValueDetailed(
+  raw: string | null | undefined,
+  unit?: string | null,
+): NormalizedDetail | null {
+  if (raw == null) return null;
+  const text = String(raw);
+  const found = findNumericToken(text);
+  if (!found) return null;
+  const n = parseToken(found.token);
+  if (n == null) return null;
+
+  const fromAttached = multiplierFromWord(found.attached);
+  const fromNext = multiplierFromWord(found.nextWord);
+  const fromUnit = unit ? multiplierFromWord(String(unit).split(/\s+/)[0] ?? '') : null;
+
+  const suffixApplied = fromAttached != null || fromNext != null;
+  const unitApplied = !suffixApplied && fromUnit != null;
+  const ns = detectNonScalable(text, unit, found.attached);
+
+  const value = (fromAttached ?? fromNext ?? fromUnit) != null && !ns.nonScalable
+    ? n * (fromAttached ?? fromNext ?? fromUnit)!
+    : n;
+
+  return {
+    value: found.negative ? -value : value,
+    suffixApplied: suffixApplied && !ns.nonScalable,
+    unitApplied,
+    nonScalable: ns.nonScalable,
+    nonScalableReason: ns.reason,
+  };
+}

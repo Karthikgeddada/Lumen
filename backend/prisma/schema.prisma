@@ -481,6 +481,7 @@ model ExtractionResult {
   sheet        String?
   cell         String?      // e.g. "B7"
   excerpt      String?      @db.Text
+  scale        Json?        // unit-scale provenance: {multiplier, label, from, page, tableId, headerText, flags}
   status       ResultStatus  @default(NEEDS_REVIEW)
   flagged      Boolean      @default(false)
   note         String?
@@ -597,6 +598,7 @@ model MetricObservation {
   sourceDocumentId  String?
   sourcePage        Int?
   sourceExcerpt     String?    @db.Text
+  scale             Json?      // unit-scale provenance carried over from the reviewed extraction result
   extractionResultId String?
   createdAt         DateTime   @default(now())
 

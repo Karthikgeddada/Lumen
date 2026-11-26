@@ -2,6 +2,7 @@ import { prisma } from '../prisma';
 import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
+import { enrichResultsWithScale } from './scaleEnrich';
 
 // Structured field extraction, grounded in retrieved evidence. Every result
 // carries its confidence, source document, page/sheet/cell pointer and an
@@ -97,6 +98,10 @@ export async function runExtraction(taskId: string): Promise<void> {
         });
       }
     }
+
+    // Detect unit scales from document/table/page headers and annotate every
+    // result with provenance + review flags before the human sees the queue.
+    await enrichResultsWithScale(taskId);
 
     await prisma.extractionTask.update({
       where: { id: taskId },

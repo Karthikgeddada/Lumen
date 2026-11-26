@@ -2,8 +2,10 @@
   "name": "lumen-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Lumen Document Intelligence — REST API, document processing engine and background worker",
-  "engines": { "node": ">=20" },
+  "description": "Lumen Document Intelligence \u2014 REST API, document processing engine and background worker",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:worker": "tsx watch src/worker.ts",
@@ -13,7 +15,9 @@
     "seed": "tsx prisma/seed.ts",
     "prisma:generate": "prisma generate",
     "migrate:deploy": "prisma migrate deploy",
-    "migrate:dev": "prisma migrate dev"
+    "migrate:dev": "prisma migrate dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -49,6 +53,7 @@
     "@types/nodemailer": "^6.4.15",
     "prisma": "^5.19.1",
     "tsx": "^4.16.5",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.7"
   }
 }

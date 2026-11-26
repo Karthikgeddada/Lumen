@@ -239,10 +239,17 @@ function CreateExtraction({ open, onClose, workspaceId, canEdit, onCreated }: {
 }
 
 // ── Task detail with results review ───────────────────────────────
+interface ScaleInfo {
+  multiplier: number | null;
+  appliedFrom: string | null;
+  provenance: { label: string | null; headerText: string | null; from: string | null; page: number | null; tableId: string | null } | null;
+  flags: string[];
+  nonScalable: string | null;
+}
 interface Result {
   id: string; fieldId: string; documentId: string; value: string | null; unit: string | null;
   confidence: number | null; status: string; page: number | null; sheet: string | null;
-  cell: string | null; excerpt: string | null; flagged: boolean;
+  cell: string | null; excerpt: string | null; flagged: boolean; note: string | null; scale: ScaleInfo | null;
   field: { key: string; label: string; type: string };
   document: { id: string; name: string };
 }
@@ -297,12 +304,29 @@ function TaskDetail({ taskId, onClose, canEdit, canReview }: {
                     <td style={{ fontSize: 12.5 }}>
                       <Link href={`/documents/${r.document.id}`} style={{ color: 'inherit' }}>{r.document.name}</Link>
                     </td>
-                    <td className="mono" style={{ fontSize: 12.5 }}>{r.value ?? '—'}</td>
+                    <td className="mono" style={{ fontSize: 12.5 }}>
+                      {r.value ?? '—'}
+                      {r.value && r.scale?.appliedFrom && r.scale.appliedFrom !== 'none' ? (
+                        <span className="badge badge-neutral" style={{ marginLeft: 6, fontSize: 10.5 }}
+                          title={`Scale ×${r.scale.multiplier ?? 1} from ${r.scale.appliedFrom}${r.scale.provenance?.headerText ? `: "${r.scale.provenance.headerText}"` : ''}`}>
+                          ×{r.scale.multiplier ?? 1} · {r.scale.appliedFrom}
+                        </span>
+                      ) : null}
+                      {r.scale?.nonScalable ? (
+                        <span className="badge badge-neutral" style={{ marginLeft: 6, fontSize: 10.5 }}
+                          title={`Never scaled: ${r.scale.nonScalable}`}>{r.scale.nonScalable}</span>
+                      ) : null}
+                    </td>
                     <td><Confidence value={r.confidence} /></td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                       {r.page ? `p.${r.page}` : r.sheet ? `${r.sheet}${r.cell ? ` ${r.cell}` : ''}` : '—'}
                     </td>
-                    <td><span className={`badge ${RESULT_STATUS[r.status]?.cls ?? 'badge-neutral'}`}>{RESULT_STATUS[r.status]?.label ?? r.status}</span></td>
+                    <td>
+                      {r.flagged && r.status === 'NEEDS_REVIEW' ? (
+                        <span className="badge badge-warn" style={{ marginRight: 6 }} title={r.note ?? 'Flagged for review'}>flag</span>
+                      ) : null}
+                      <span className={`badge ${RESULT_STATUS[r.status]?.cls ?? 'badge-neutral'}`}>{RESULT_STATUS[r.status]?.label ?? r.status}</span>
+                    </td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {r.excerpt ? (
                         <button className="btn btn-ghost btn-sm" title="View evidence"
@@ -331,6 +355,22 @@ function TaskDetail({ taskId, onClose, canEdit, canReview }: {
               {editing.cell ? <span className="badge badge-neutral mono">{editing.cell}</span> : null}
               <Confidence value={editing.confidence} />
             </div>
+            {editing.scale && (editing.scale.appliedFrom || editing.scale.flags.length || editing.scale.nonScalable) ? (
+              <div className="card" style={{ padding: 12, background: 'var(--sunken)', boxShadow: 'none', fontSize: 12.5, marginBottom: 12 }}>
+                <div className="strong" style={{ marginBottom: 4 }}>Unit scale</div>
+                {editing.scale.appliedFrom && editing.scale.appliedFrom !== 'none' ? (
+                  <div>×{editing.scale.multiplier ?? 1} applied from <span className="strong">{editing.scale.appliedFrom}</span>
+                    {editing.scale.provenance?.headerText ? <> — “{editing.scale.provenance.headerText}”</> : null}
+                    {editing.scale.provenance?.page != null ? <> (p.{editing.scale.provenance.page})</> : null}
+                  </div>
+                ) : <div>No scale applied{editing.scale.nonScalable ? ` — ${editing.scale.nonScalable} (never scaled)` : ''}.</div>}
+                {editing.scale.flags.length ? (
+                  <div style={{ color: 'var(--warn, #b45309)', marginTop: 4 }}>
+                    {editing.scale.flags.map((f, i) => <div key={i}>⚠ {f}</div>)}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <div className="card" style={{ padding: 14, background: 'var(--sunken)', boxShadow: 'none', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 14 }}>
               {editing.excerpt ?? 'No excerpt captured.'}
             </div>

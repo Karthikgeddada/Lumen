@@ -74,9 +74,33 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **Internally:** task created → worker job → per document × field, the LLM reads retrieved chunks and returns a structured value + provenance → results stored for review. Verified results are upserted into analytics keyed by entity + metric + period (period parsed from the document name). **Value normalization:** raw strings like "$4.82 billion", "4,820 million", "(1,234)" (US and EU number formats, accounting negatives, spelled-out and abbreviated multipliers) are converted to true numbers on ingest — 25-case test suite against the shipped module.
 
-**Gaps:** none known in the extraction→analytics path. Adjacent open work: PDF table detection (tables are kept as text), OCR for scanned documents.
+**Gaps:** PDF table detection (tables are kept as text), OCR for scanned documents. Unit-scale detection now shipped (see below).
 
-**Status: LIVE** — normalizer shipped and unit-verified 2026-11-26.
+### 4a. Unit-scale detection (2026-11-26)
+
+**What it is:** financial statements declare their scale in headers ("in thousands", "$ millions", "000s", "$ in 000"). The extractor is told this scale and applies it exactly once per figure, with provenance stored and ambiguity flagged — never guessed silently.
+
+**How it works (one precedence order, documented):**
+1. **Value's own suffix** — "4.82 billion" / "4,820mn" already carries scale; nothing else is applied.
+2. **Extractor unit field** — "millions"/"USD mn" in the unit column wins over any header.
+3. **Table header** — scale found in the table title, column header, or first rows of the table the figure came from.
+4. **Page header** — scale declared at the top of the page (e.g. "in thousands, except per share data").
+5. **Document header** — scale declared once for the whole document.
+Lower-precedence scales are never stacked on top of higher ones (explicit double-scaling guard, tested).
+
+**Never scaled:** ratios, multiples ("4.5x"), percentages, and per-share figures — including under "in thousands, except per share data" headers.
+
+**Conflicts & absence:** if table and page/document scales disagree, the figure is marked AI_INFERRED and flagged for review with the reason. If a monetary value has no detectable scale anywhere, the raw value is kept (units never assumed), flagged "scale not found" for review.
+
+**Provenance stored with the value:** `scale` JSON on the extraction result (multiplier, label, where found: suffix/unit/table/page/document, page/sheet/tableId, and the header text that fired the rule) — visible in the review queue, and carried onto the metric observation at ingest.
+
+**Verified by:** Vitest suite (`backend/src/services/*.test.ts`): the original 25 normalizer cases + 12 scale cases (thousands, millions, billions, "000s", "$ in 000", mixed scale, per-share exception, double-scaling guard, missing scale, conflicting scales). CI (GitHub Actions) runs typecheck + tests on every push.
+
+**Limits:** column-level scale detection is only as good as header text (a scale buried mid-table in prose may be missed — those figures get the conservative missing-scale flag); per-share detection is by unit/value shape ("/share", EPS-style units), not semantic.
+
+**Status: LIVE** — see FEATURES item 4 above for the review flow it plugs into.
+
+**Gaps resolved by 4a:** silent 1000×/1M× errors from ignored scale headers.
 
 ## 5. Diligence Questionnaires
 
