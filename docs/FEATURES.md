@@ -84,13 +84,14 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **What it can do today:**
 - AI drafts a questionnaire from selected documents (background job)
+- **Document scope, enforced**: pick which data-room documents the AI may draft answers from (multi-select at creation, changeable anytime — scope shown in the header; empty = all workspace documents)
 - Questions, answers, and per-answer evidence (source document + excerpt)
-- Review flow: answers land as needs-review → reviewer approves
-- Per-questionnaire page with status
+- Review flow: answers land as needs-review → reviewer approves; low-confidence answers require review
+- Import questions from Excel/CSV; add questions manually; per-questionnaire page with status; export
 
-**Internally:** questionnaire created → worker drafts questions via LLM from retrieved document content → answers reference evidence chunks → approval recorded per answer with reviewer id.
+**Internally:** questionnaire created (with its document scope, tenancy-validated) → worker drafts answers via LLM from retrieved chunks of the scoped documents only → answers reference evidence chunks → approval recorded per answer with reviewer id.
 
-**Status: LIVE** (verify pass pending on demo data).
+**Status: LIVE** — document scope shipped and prod-verified 2026-11-26. Full drafting run on demo data not yet executed end-to-end (founder paused document testing); retrieval path is the same code verified for the AI Assistant.
 
 ## 6. Portfolio Analytics
 
