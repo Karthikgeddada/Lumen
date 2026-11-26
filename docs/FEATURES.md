@@ -72,11 +72,11 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 - Export to CSV/Excel
 - **Send verified values to Analytics** — one click creates/updates the portfolio entity and quarterly observations (marked AI-inferred, with source + confidence carried over)
 
-**Internally:** task created → worker job → per document × field, the LLM reads retrieved chunks and returns a structured value + provenance → results stored for review. Verified results are upserted into analytics keyed by entity + metric + period (period parsed from the document name).
+**Internally:** task created → worker job → per document × field, the LLM reads retrieved chunks and returns a structured value + provenance → results stored for review. Verified results are upserted into analytics keyed by entity + metric + period (period parsed from the document name). **Value normalization:** raw strings like "$4.82 billion", "4,820 million", "(1,234)" (US and EU number formats, accounting negatives, spelled-out and abbreviated multipliers) are converted to true numbers on ingest — 25-case test suite against the shipped module.
 
-**Gaps:** values like "4.82 billion" are ingested naively (4.82, no ×10⁹ normalization) — needs a unit-multiplier normalizer before real use.
+**Gaps:** none known in the extraction→analytics path. Adjacent open work: PDF table detection (tables are kept as text), OCR for scanned documents.
 
-**Status: LIVE** (normalizer gap noted).
+**Status: LIVE** — normalizer shipped and unit-verified 2026-11-26.
 
 ## 5. Diligence Questionnaires
 
