@@ -107,6 +107,8 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **Gaps:** derived-metric formula engine ("CALCULATED" is a label set by hand or by seeding; no in-app formula definitions yet — e.g. net leverage = net debt ÷ EBITDA must be entered or computed outside); chart UX depth.
 
+**Retrieval infrastructure (2026-11-26):** chunk search now runs on **pgvector** (HNSW cosine index over MiniLM embeddings) + **pg_trgm** (trigram index backing the keyword path — previously a sequential scan over every chunk). Ranking formula and all honest fallbacks unchanged. Semantic path engages for embedded documents; demo-seeded chunks (no embeddings) are served by the indexed keyword path.
+
 **Status: LIVE** (seeded demo data in prod).
 
 ## 7. Covenants
@@ -124,7 +126,7 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **Internally:** definitions (`CovenantDefinition`) → for each test, fetch that quarter's observation for the metric → evaluate comparator → store `CovenantResult` (value, status, headroom) → notification on a **fresh** FAIL. Triggers: manual run, covenant create/update, and any metric observation upsert (manual entry + extraction ingest — fire-and-forget, entry never fails because of the retest).
 
-**Gaps:** email/webhook alerting (notifications are in-app today).
+**Gaps:** email/webhook alerting — email now SHIPPED (2026-11-26): fresh breaches email every active member via SMTP (branded, same freshness rule as in-app alerts; no-ops without SMTP config). Webhook alerting remains future work.
 
 **Status: LIVE** — automatic compliance engine shipped and prod-verified 2026-11-26 (5/5 definitions auto re-tested on new entry; fresh-breach guard verified).
 
