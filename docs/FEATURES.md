@@ -105,7 +105,7 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **Internally:** `Entity` + `MetricObservation` (unique per entity+metric+period, so re-ingesting updates rather than duplicates) → series API → frontend charts.
 
-**Gaps:** charts/UX depth on the analytics page; scheduled recalculation of derived metrics.
+**Gaps:** derived-metric formula engine ("CALCULATED" is a label set by hand or by seeding; no in-app formula definitions yet — e.g. net leverage = net debt ÷ EBITDA must be entered or computed outside); chart UX depth.
 
 **Status: LIVE** (seeded demo data in prod).
 
@@ -116,16 +116,17 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 **What it can do today:**
 - Define tests manually: metric + comparator (must stay ≤ or ≥) + threshold + unit, linked to a company and the source document
 - **AI extraction from credit agreements:** Lumen reads the agreement via RAG and proposes covenants with the exact clause excerpt, page, and confidence — you review before they go live (AI-proposed → reviewed)
+- **Automatic compliance:** a covenant is tested the moment it's defined or changed; when new numbers land (manual entry or extraction ingest), every affected period's covenants re-test automatically — no manual run needed
+- Breach alerts as notifications — **fresh breaches only** (re-tests never re-alert already-known breaches)
 - Run tests per company per quarter: each returns PASS/FAIL with the actual value vs threshold and **headroom** (how close to the line)
 - Full result history per covenant
-- Breach alerts as notifications ("Halden Industrial — Q3 2026: 1 of 5 covenants failed")
 - Dashboard shows the board; Data Quality shows the reviewed/AI-proposed split
 
-**Internally:** definitions (`CovenantDefinition`) → for each test, fetch that quarter's observation for the metric → evaluate comparator → store `CovenantResult` (value, status, headroom) → notification on FAIL.
+**Internally:** definitions (`CovenantDefinition`) → for each test, fetch that quarter's observation for the metric → evaluate comparator → store `CovenantResult` (value, status, headroom) → notification on a **fresh** FAIL. Triggers: manual run, covenant create/update, and any metric observation upsert (manual entry + extraction ingest — fire-and-forget, entry never fails because of the retest).
 
-**Gaps:** tests run on demand (manual) — auto re-run when new numbers land is the next build; email/webhook alerting.
+**Gaps:** email/webhook alerting (notifications are in-app today).
 
-**Status: LIVE.**
+**Status: LIVE** — automatic compliance engine shipped and prod-verified 2026-11-26 (5/5 definitions auto re-tested on new entry; fresh-breach guard verified).
 
 ## 8. Data Quality
 
