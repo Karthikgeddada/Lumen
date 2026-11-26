@@ -24,6 +24,10 @@ function finalValue(
   return { value, decision };
 }
 
+const table = (label: string, multiplier: number, headerText: string): ScaleCandidate => ({
+  multiplier, label, headerText, from: 'table', page: 3, tableId: 't1', sheet: null,
+});
+
 describe('detectScaleInText — header patterns', () => {
   it.each([
     ['IN THOUSANDS', 1e3, 'thousands'],
@@ -55,9 +59,6 @@ describe('detectScaleInText — header patterns', () => {
 });
 
 describe('decideScale — the 12 mandated scale cases', () => {
-  const table = (label: string, multiplier: number, headerText: string): ScaleCandidate => ({
-    multiplier, label, headerText, from: 'table', page: 3, tableId: 't1', sheet: null,
-  });
   const page = (label: string, multiplier: number, headerText: string): ScaleCandidate => ({
     multiplier, label, headerText, from: 'page', page: 3, tableId: null, sheet: null,
   });
@@ -144,13 +145,18 @@ describe('decideScale — the 12 mandated scale cases', () => {
     expect(decision.flags[0]).toContain('document declares millions');
   });
 
-  it('11. unit field beats table header (precedence 2 over 3)', () => {
+  it('11. unit field beats table header (precedence 2 over 3) — disagreement is flagged', () => {
     const { value, decision } = finalValue('4,820', 'millions USD', {
       table: table('thousands', 1e3, 'In thousands'),
     });
     expect(value).toBe(4.82e9); // unit's millions already applied by the normalizer
     expect(decision.appliedFrom).toBe('unit');
-    expect(decision.flags).toHaveLength(0); // precedence resolves it — not a conflict
+    // Item 0.5: the unit still wins by precedence, but the header's different
+    // scale is a conflict — flagged, never silently guessed.
+    expect(decision.flags).toHaveLength(1);
+    expect(decision.flags[0]).toContain('scale conflict');
+    expect(decision.flags[0]).toContain('unit says millions');
+    expect(decision.flags[0]).toContain('table header says thousands');
   });
 
   it('12. ratios are never scaled even with a table header present', () => {
@@ -172,5 +178,32 @@ describe('decideScale — non-currency figures without scale', () => {
   it('raw currency symbol without unit is still treated as currency', () => {
     const { decision } = finalValue('$4,820', null, {});
     expect(decision.flags[0]).toContain('scale not found');
+  });
+});
+
+describe('decideScale — Item 0.5: header-only rule + unit-vs-header conflicts', () => {
+  it('13. header "in thousands" with the extractor returning no unit — the table-header rule fires', () => {
+    const { value, decision } = finalValue('4,820', null, { table: table('thousands', 1e3, 'In thousands') });
+    expect(value).toBe(4.82e6);
+    expect(decision.appliedFrom).toBe('table');
+    expect(decision.provenance?.label).toBe('thousands');
+    expect(decision.provenance?.headerText).toBe('In thousands');
+    expect(decision.flags).toHaveLength(0);
+  });
+
+  it('14. unit-vs-header conflict is flagged, not guessed — unit still applies, a human must review', () => {
+    const { value, decision } = finalValue('4,820', 'millions', { table: table('thousands', 1e3, 'In thousands') });
+    expect(value).toBe(4.82e9); // the unit's scale was already applied by the parser
+    expect(decision.appliedFrom).toBe('unit');
+    expect(decision.flags).toHaveLength(1);
+    expect(decision.flags[0]).toContain('scale conflict');
+    expect(decision.flags[0]).toContain('extractor unit says millions');
+    expect(decision.flags[0]).toContain('table header says thousands');
+  });
+
+  it('15. unit agreeing with the header is not a conflict', () => {
+    const { value, decision } = finalValue('4,820', 'thousands', { table: table('thousands', 1e3, 'In thousands') });
+    expect(value).toBe(4.82e6);
+    expect(decision.flags).toHaveLength(0);
   });
 });

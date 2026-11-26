@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { parseNumericValueDetailed } from './normalizer';
 import { runCovenantTests } from './covenants';
-import { scaleUnresolved } from './trust';
+import { ingestConflict, IngestConflict, sameNumber, scaleUnresolved } from './trust';
 
 // Analytics are derived from actual stored data — extraction results and
 // metric observations — and every value keeps its derivation (REPORTED /
@@ -96,7 +96,7 @@ export async function entityOverview(entityId: string, quarters = 4) {
 export async function ingestFromExtraction(
   workspaceId: string,
   taskId: string,
-): Promise<{ created: number; refused: number }> {
+): Promise<{ created: number; refused: number; conflicts: IngestConflict[] }> {
   const task = await prisma.extractionTask.findUnique({
     where: { id: taskId },
     include: {
@@ -106,13 +106,14 @@ export async function ingestFromExtraction(
       },
     },
   });
-  if (!task) return { created: 0, refused: 0 };
+  if (!task) return { created: 0, refused: 0, conflicts: [] };
 
   const entity = await prisma.entity.findFirst({ where: { workspaceId, name: task.name } });
-  if (!entity) return { created: 0, refused: 0 };
+  if (!entity) return { created: 0, refused: 0, conflicts: [] };
 
   let created = 0;
   let refused = 0; // TRUST RULE: VERIFIED results whose scale is still unresolved
+  const conflicts: IngestConflict[] = []; // OVERWRITE GUARD: existing figures that differ
   const affectedPeriods = new Set<string>();
   for (const r of task.results) {
     // Scale-aware parsing: parseNumericValueDetailed reports whether the value
@@ -142,6 +143,25 @@ export async function ingestFromExtraction(
     const period = r.document.name.match(/(Q[1-4]\s?\d{4}|\d{4})/i)?.[0]?.replace(/\s/, ' ') ?? null;
     if (!period) continue;
 
+    // Overwrite guard: never silently replace a stored observation that
+    // already carries a different figure. Same value -> refresh metadata;
+    // different value -> skip and report the conflict for a human.
+    const existing = await prisma.metricObservation.findUnique({
+      where: { entityId_metricKey_period: { entityId: entity.id, metricKey: r.field.key, period } },
+    });
+    if (existing && !sameNumber(existing.value, numeric)) {
+      conflicts.push(
+        ingestConflict(
+          entity.name,
+          r.field.key,
+          period,
+          { value: existing.value, derivation: existing.derivation, sourceDocumentId: existing.sourceDocumentId },
+          { value: numeric, sourceDocumentId: r.documentId },
+        ),
+      );
+      continue;
+    }
+
     await prisma.metricObservation.upsert({
       where: {
         entityId_metricKey_period: {
@@ -168,6 +188,7 @@ export async function ingestFromExtraction(
       update: {
         value: numeric,
         unit: r.unit ?? '',
+        derivation: 'AI_INFERRED', // the figure now comes from extraction — set it on update too
         confidence: r.confidence,
         sourceDocumentId: r.documentId,
         sourcePage: r.page,
@@ -185,7 +206,7 @@ export async function ingestFromExtraction(
   for (const period of affectedPeriods) {
     void runCovenantTests(workspaceId, entity.id, period).catch(() => {});
   }
-  return { created, refused };
+  return { created, refused, conflicts };
 }
 
 // Scheduled reports support simple recurring cadences: daily | weekly | monthly.

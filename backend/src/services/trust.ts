@@ -103,3 +103,57 @@ export function evaluateCovenant(
   const headroom = def.comparator === 'LTE' ? def.threshold - obs.value : obs.value - def.threshold;
   return { status: headroom >= 0 ? 'PASS' : 'FAIL', value: obs.value, headroom, reason: null };
 }
+
+// ── Ingest overwrite guard (Item 0.5) ──────────────────────────────
+// Extraction ingest must never silently overwrite a stored observation that
+// already carries a different figure — the same value refreshes metadata, a
+// different value is a conflict a human must resolve.
+
+export function sameNumber(a: number, b: number): boolean {
+  // Floats from different parse paths can differ in their last bits; values
+  // that agree to one part in a billion are the same figure.
+  return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
+export type IngestConflict = {
+  entity: string;
+  metric: string;
+  period: string;
+  existingValue: number;
+  existingDerivation: string;
+  existingSourceDocumentId: string | null;
+  newValue: number;
+  newSourceDocumentId: string | null;
+};
+
+export function ingestConflict(
+  entity: string,
+  metric: string,
+  period: string,
+  existing: { value: number; derivation: string; sourceDocumentId: string | null },
+  incoming: { value: number; sourceDocumentId: string | null },
+): IngestConflict {
+  return {
+    entity,
+    metric,
+    period,
+    existingValue: existing.value,
+    existingDerivation: existing.derivation,
+    existingSourceDocumentId: existing.sourceDocumentId,
+    newValue: incoming.value,
+    newSourceDocumentId: incoming.sourceDocumentId,
+  };
+}
+
+// ── Covenant breach freshness (Item 0.5) ───────────────────────
+// A NOT_TESTED result can mask the last real status (unresolved scale,
+// missing observation). A FAIL -> NOT_TESTED -> FAIL sequence is the same
+// known breach re-appearing — it must not alert as if it were new.
+export function isFreshBreach(
+  previous: { status: string; previousStatus?: string | null } | null | undefined,
+): boolean {
+  if (!previous) return true;
+  if (previous.status === 'FAIL') return false;
+  if (previous.status === 'NOT_TESTED' && previous.previousStatus === 'FAIL') return false;
+  return true;
+}

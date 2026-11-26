@@ -3,7 +3,7 @@ import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
 import { sendCovenantBreachEmail } from './mailer';
-import { evaluateCovenant } from './trust';
+import { evaluateCovenant, isFreshBreach } from './trust';
 
 // Covenant intelligence: extract covenant definitions from credit agreements
 // (grounded in the actual clauses), then test each quarter's observed metrics
@@ -174,13 +174,15 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
 
     const previous = await prisma.covenantResult.findFirst({
       where: { definitionId: def.id, period: targetPeriod },
-      select: { id: true, status: true },
+      select: { id: true, status: true, previousStatus: true },
     });
 
     if (status === 'PASS') passed++;
     else if (status === 'FAIL') {
       failed++;
-      if (previous?.status !== 'FAIL') freshBreaches++;
+      // NOT_TESTED can mask the last real status: a FAIL -> NOT_TESTED -> FAIL
+      // flip is the same known breach re-appearing — not a new alert.
+      if (isFreshBreach(previous)) freshBreaches++;
     }
     else notTested++;
 
@@ -201,6 +203,7 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
         headroom,
         observationId,
         reason,
+        previousStatus: previous?.status ?? null, // what this result was before this run
         computedAt: new Date(),
       },
     });

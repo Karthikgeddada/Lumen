@@ -82,7 +82,7 @@ You upload documents (credit agreements, earnings releases, spreadsheets). Lumen
 
 **How it works (one precedence order, documented):**
 1. **Value's own suffix** — "4.82 billion" / "4,820mn" already carries scale; nothing else is applied.
-2. **Extractor unit field** — "millions"/"USD mn" in the unit column wins over any header.
+2. **Extractor unit field** — "millions"/"USD mn" in the unit column wins over any header. (2026-11-26, Item 0.5: if the header declares a DIFFERENT scale than the unit, the unit still wins by precedence but the figure is flagged as a scale conflict for review — never silently trusted.)
 3. **Table header** — scale found in the table title, column header, or first rows of the table the figure came from.
 4. **Page header** — scale declared at the top of the page (e.g. "in thousands, except per share data").
 5. **Document header** — scale declared once for the whole document.
@@ -90,11 +90,11 @@ Lower-precedence scales are never stacked on top of higher ones (explicit double
 
 **Never scaled:** ratios, multiples ("4.5x"), percentages, and per-share figures — including under "in thousands, except per share data" headers.
 
-**Conflicts & absence:** if table and page/document scales disagree, the figure is marked AI_INFERRED and flagged for review with the reason. If a monetary value has no detectable scale anywhere, the raw value is kept (units never assumed), flagged "scale not found" for review.
+**Conflicts & absence:** if table and page/document scales disagree, or if the extractor's unit and a header disagree, the figure is marked AI_INFERRED and flagged for review with the reason. If a monetary value has no detectable scale anywhere, the raw value is kept (units never assumed), flagged "scale not found" for review.
 
 **Provenance stored with the value:** `scale` JSON on the extraction result (multiplier, label, where found: suffix/unit/table/page/document, page/sheet/tableId, and the header text that fired the rule) — visible in the review queue, and carried onto the metric observation at ingest.
 
-**Verified by:** Vitest suite (`backend/src/services/*.test.ts`): the original 25 normalizer cases + 12 scale cases (thousands, millions, billions, "000s", "$ in 000", mixed scale, per-share exception, double-scaling guard, missing scale, conflicting scales). CI (GitHub Actions) runs typecheck + tests on every push.
+**Verified by:** Vitest suite (`backend/src/services/*.test.ts`): the original 25 normalizer cases + 12 scale cases (thousands, millions, billions, "000s", "$ in 000", mixed scale, per-share exception, double-scaling guard, missing scale, conflicting scales) plus Item 0.5 cases (header-only "in thousands" with no unit; unit-vs-header conflict flagged; unit-header agreement not a conflict). CI (GitHub Actions) runs typecheck + tests on every push.
 
 **Limits:** column-level scale detection is only as good as header text (a scale buried mid-table in prose may be missed — those figures get the conservative missing-scale flag); per-share detection is by unit/value shape ("/share", EPS-style units), not semantic.
 
@@ -208,6 +208,12 @@ A `Report` model and a `RUN_REPORT` job type exist in the codebase, but there is
 - The pure decision logic (`scaleUnresolved`, `applyScaleResolution`, `evaluateCovenant`) lives in `services/trust.ts` with no I/O, and every path above is covered by `trust.test.ts` (Vitest).
 
 **Limits:** this covers scale flags only — validation flags (sum checks, outlier jumps) join in the next phase. It is deliberately not retroactive-computing: observations ingested before 2026-11-26 with unresolved flags are protected at covenant-test time (NOT_TESTED with reason); re-verifying the underlying extraction remains an explicit analyst action. Existing PASS/FAIL covenant results are never rewritten; a re-run may legitimately flip a previously-tested covenant to NOT_TESTED if its figure is unresolved.
+
+**Item 0.5 hardening (2026-11-26, same day):**
+- **Ingest overwrite guard** — `ingestFromExtraction` never silently overwrites a stored observation with a different value: same figure (within a one-part-in-a-billion tolerance) refreshes metadata and sets `derivation: AI_INFERRED` on update; a different value is skipped and reported as a conflict (entity, metric, period, existing value + derivation + source vs new value + source) in the ingest response. Pure logic (`sameNumber`, `ingestConflict`) in `services/trust.ts`.
+- **Covenant previousStatus** — every re-evaluation records what the result was before the run (`previousStatus`, migration `20261126093000_covenant_result_previous_status`, additive). The Covenants page shows "· was pass/breach" when a NOT_TESTED result previously had a real status. Fresh-breach alerting reads it: a FAIL → NOT_TESTED → FAIL flip is the same known breach re-appearing, not a new alert (`isFreshBreach`).
+- **Unit-vs-header conflicts** — see §4a precedence note above; the flag makes such figures subject to the resolution gate.
+- **Entity deletion** — `DELETE /api/:workspaceId/analytics/entities/:entityId` (ADMIN-only, audit-logged `entity.deleted`): removes the entity, its observations and covenant definitions/results; scheduled reports survive unlinked. Exists so test entities can be cleaned up properly instead of lingering.
 
 **Status: LIVE.**
 

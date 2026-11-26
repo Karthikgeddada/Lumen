@@ -342,8 +342,8 @@ router.post(
       create: { workspaceId: task.workspaceId, name: task.name },
       update: {},
     });
-    const { created, refused } = await ingestFromExtraction(task.workspaceId, task.id);
-    res.json({ ok: true, entityId: entity.id, created, refused });
+    const { created, refused, conflicts } = await ingestFromExtraction(task.workspaceId, task.id);
+    res.json({ ok: true, entityId: entity.id, created, refused, conflicts });
   }),
 );
 

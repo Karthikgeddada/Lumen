@@ -123,11 +123,27 @@ export function decideScale(input: ScaleInput): ScaleDecision {
 
   // 2. The extractor's unit field carries the scale ("millions").
   if (input.unitApplied) {
+    // Item 0.5: if a header (table/page/document) declares a DIFFERENT scale
+    // than the unit, that disagreement is a conflict. The unit still wins by
+    // precedence (the parser already applied it), but the figure is flagged
+    // for review — never silently trusted. The trust rule then requires an
+    // explicit resolution before it can be verified or ingested.
+    const unitScale = detectScaleInText(unit);
+    const disagreeing = [input.table, input.page, input.document]
+      .filter((c): c is ScaleCandidate => !!c)
+      .filter((c) => unitScale != null && c.multiplier !== unitScale.multiplier);
+    const flags = unitScale != null && disagreeing.length
+      ? [
+          `scale conflict: extractor unit says ${unitScale.label} (×${unitScale.multiplier}) but ${disagreeing
+            .map((c) => `${c.from} header says ${c.label} (×${c.multiplier})`)
+            .join('; ')} — verify against the source`,
+        ]
+      : [];
     return {
       multiplier: null, // parseNumericValue already applied it
       appliedFrom: 'unit',
       provenance: { label: String(unit ?? ''), headerText: String(unit ?? ''), from: 'unit' },
-      flags: [],
+      flags,
     };
   }
 

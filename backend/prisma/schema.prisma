@@ -691,6 +691,7 @@ model CovenantResult {
   headroom     Float?               // signed distance to threshold; positive = compliant
   observationId String?             // MetricObservation backing the value
   reason       String?              // why NOT_TESTED (e.g. unresolved scale flags on the observation)
+  previousStatus CovenantResultStatus? // status before the latest evaluation — NOT_TESTED can mask the last real one
   computedAt   DateTime             @default(now())
 
   definition CovenantDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)

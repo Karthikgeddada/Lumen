@@ -1,0 +1,12 @@
+# Non-obvious decisions — phase/accuracy-evidence
+
+Format: **What** · Why · Alternatives considered. Append-only per item.
+
+## A. Close-outs
+
+- **README "wrong URL" — no fix needed.** README.md contains no backend URL at all (verified by grep for `https://`, `onrender`, `lumen-api`: zero matches), so the only wrong-URL instance was DEPLOYMENT.md, now corrected to `lumen-api-ctpy.onrender.com`. · The directive assumed both files carried the stranger's URL; only DEPLOYMENT.md did.
+- **Credentialed requests to `lumen-api.onrender.com` (a stranger's service): cannot be ruled out from the repo.** DEPLOYMENT.md recommended the wrong URL from 2026-11-22 until this fix; if any browser deployed the frontend against it during that window, its in-memory access token (Bearer) and possibly a refresh-token cookie would have been sent to that host. · No evidence in logs/repo that this happened, and access tokens are short-lived and kept in memory, so exposure is likely low. · **User action recommended:** if you ever set `NEXT_PUBLIC_API_URL=https://lumen-api.onrender.com`, sign out everywhere (clears cookies/localStorage) and rotate your password.
+- **Deleting "ITEM0 SCALE PROOF" from production is a manual step, not automated.** The ADMIN-only, workspace-scoped, audit-logged endpoint `DELETE /api/workspaces/:wid/analytics/entities/:entityId` exists for exactly this, but the production Neon DB is not reachable from the build environment (by design — no prod credentials, no prod probing). · Alternative (rejected): hardcoding a one-off cleanup in a migration — that would run against every environment and rewrite data non-idempotently. · Steps for the user are in docs/MANUAL_TEST.md.
+- **Ingest conflicts (A2) are reported, not blocking.** `ingestFromExtraction` skips a differing existing figure and returns it in `conflicts[]`; non-conflicting figures still ingest. · Alternative (rejected): aborting the whole ingest on first conflict — one bad re-extraction would then hide all good figures.
+- **`sameNumber` tolerance is one part in a billion**, not exact equality. · Two parse paths (normalizer vs unit-applied) can differ in the last float bits; a strict `===` would report false conflicts for the same figure.
+- **`previousStatus` records the pre-run status of the same row, not a history table.** · Enough for the mandated alert rule (FAIL→NOT_TESTED→FAIL is not fresh) and the UI hint; a full audit trail of covenant changes is future work.

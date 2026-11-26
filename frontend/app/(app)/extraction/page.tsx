@@ -25,6 +25,15 @@ interface Template {
 }
 interface Doc { id: string; name: string; status: string; isDemo: boolean }
 
+// Overwrite guard: a stored figure that differs from the incoming one is
+// skipped (never silently overwritten) and reported here.
+interface IngestConflict {
+  entity: string; metric: string; period: string;
+  existingValue: number; existingDerivation: string; existingSourceDocumentId: string | null;
+  newValue: number; newSourceDocumentId: string | null;
+}
+interface IngestResponse { ok: boolean; entityId: string; created: number; refused: number; conflicts: IngestConflict[] }
+
 interface ExtractField { key: string; label: string; type: 'text' | 'number' | 'currency' | 'percent' | 'date'; description?: string }
 
 const RESULT_STATUS: Record<string, { label: string; cls: string }> = {
@@ -259,6 +268,7 @@ function TaskDetail({ taskId, onClose, canEdit, canReview }: {
 }) {
   const [editing, setEditing] = useState<Result | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [ingestConflicts, setIngestConflicts] = useState<IngestConflict[] | null>(null);
 
   const { data, mutate } = useSWR(taskId, (id: string) =>
     api<{ task: { id: string; name: string; status: string; fields: { id: string; label: string }[]; results: Result[] } }>(`/api/extraction-tasks/${id}`),
@@ -287,12 +297,24 @@ function TaskDetail({ taskId, onClose, canEdit, canReview }: {
             </a>
             {canEdit ? (
               <button className="btn btn-secondary btn-sm" onClick={async () => {
-                await api(`/api/extraction-tasks/${task.id}/ingest-analytics`, { method: 'POST' });
+                const res = await api<IngestResponse>(`/api/extraction-tasks/${task.id}/ingest-analytics`, { method: 'POST' });
+                setIngestConflicts(res?.conflicts?.length ? res.conflicts : []);
               }}>
                 <Sparkles size={13} /> Send to analytics
               </button>
             ) : null}
           </div>
+
+          {ingestConflicts && ingestConflicts.length > 0 ? (
+            <div className="card" style={{ marginBottom: 14, padding: '10px 14px', borderColor: 'var(--warn)' }}>
+              <div className="strong" style={{ marginBottom: 6 }}>⚑ {ingestConflicts.length} overwrite conflict{ingestConflicts.length > 1 ? 's' : ''} — skipped, existing figures kept</div>
+              {ingestConflicts.map((c, i) => (
+                <div key={i} style={{ fontSize: 12.5, marginBottom: 4 }}>
+                  <span className="strong">{c.entity}</span> · {c.metric} · {c.period}: stored <span className="mono">{c.existingValue}</span> ({c.existingDerivation}) vs new <span className="mono">{c.newValue}</span> — resolve manually in Analytics before re-sending.
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           <div style={{ maxHeight: 480, overflowY: 'auto' }}>
             <table className="table">

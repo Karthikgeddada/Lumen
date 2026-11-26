@@ -1,9 +1,10 @@
 # CI on every push (GitHub free tier): typecheck both apps, run backend tests.
+# Branches too — nothing merges to main without a green branch run.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
 
 jobs:
