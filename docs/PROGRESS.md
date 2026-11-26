@@ -11,11 +11,11 @@ Update after every item; commit + push each time. On restart: resume the first u
 - [x] A5 ADMIN-only, workspace-scoped, audited entity delete endpoint. `deploy/Caddyfile.py` already gone. Actual deletion of "ITEM0 SCALE PROOF" in prod → user action (see DECISIONS).
 
 ## B. PDF tables & regions (Python sidecar)
-- [ ] B1 python-pipelines /parse: per-table page, header row, rows, per-cell bbox + page size, contextAbove (~3 lines), per-page text lines w/ bboxes; pytest fixtures.
-- [ ] B2 Node config PARSE_SERVICE_URL + PIPELINES_TOKEN; PDF parse via sidecar (90s, 1 retry) → fallback pdf-parse, tablesUnavailable surfaced in UI + flag reasons.
-- [ ] B3 Persist tables w/ bbox in cells JSON; cell refs "p3 t1 r5 c2"; chunker keeps headers + cell ref per table-row chunk.
-- [ ] B4 Additive DocumentChunk.regions JSONB (PDF/DOCX/XLSX/TXT); fill new docs; retry/reprocess backfills.
-- [ ] B5 Extraction prefers table-row chunks; records cell ref + bbox; scaleEnrich uses contextAbove/page header.
+- [x] B1 python-pipelines /parse: per-table page, header row, rows, per-cell bbox + page size, contextAbove (~3 lines), per-page text lines w/ bboxes; pytest fixtures. (9 pytest cases incl. backward-compat base contract; new CI pipelines job)
+- [x] B2 Node config PARSE_SERVICE_URL + PIPELINES_TOKEN; PDF parse via sidecar (90s, 1 retry) → fallback pdf-parse, tablesUnavailable surfaced in UI + flag reasons.
+- [x] B3 Persist tables w/ bbox in cells JSON; cell refs "p3 t1 r5 c2"; chunker keeps headers + cell ref per table-row chunk.
+- [x] B4 Additive DocumentChunk.regions JSONB (PDF/DOCX/XLSX/TXT); fill new docs; retry/reprocess backfills (reprocess rebuilds chunks each run). Migration 20261126173000_table_regions_and_parse.
+- [x] B5 Extraction prefers table-row chunks (numeric fields, stable sort); records cell ref + bbox; scaleEnrich uses contextAbove.
 
 ## C. Validation, formulas, TTM, calculated metrics
 - [ ] C1 Post-extraction validation per figure (component sums, balance-sheet balance, unit/scale consistency, QoQ outliers; configurable).

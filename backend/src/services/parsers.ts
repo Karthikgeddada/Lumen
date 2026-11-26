@@ -3,13 +3,16 @@ import path from 'path';
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
+import { config } from '../config';
+import { logger } from '../logger';
 
 // Parsers for each supported format. Everything preserves provenance:
 // pages for PDFs, headings/paragraphs/footnotes for text documents, and
 // sheet + cell references (with formulas when present) for spreadsheets.
 
-export type ParsedCell = { v: string; ref: string; f?: string };
-export type ParsedRow = { rowIndex: number; cells: (string | ParsedCell)[] };
+export type CellBbox = { x0: number; top: number; x1: number; bottom: number };
+export type ParsedCell = { v: string; ref: string; f?: string; bbox?: CellBbox };
+export type ParsedRow = { rowIndex: number; cells: (string | ParsedCell)[]; bbox?: CellBbox };
 export type ParsedTable = {
   sheet?: string;
   title?: string;
@@ -17,6 +20,11 @@ export type ParsedTable = {
   order: number;
   header: (string | ParsedCell)[] | null;
   rows: ParsedRow[];
+  // PDF-sidecar geometry (undefined for locally parsed docs)
+  pageWidth?: number;
+  pageHeight?: number;
+  bbox?: CellBbox;
+  contextAbove?: string[];
 };
 export type ParsedSection = {
   kind: 'HEADING' | 'PARAGRAPH' | 'FOOTNOTE';
@@ -25,12 +33,26 @@ export type ParsedSection = {
   page: number | null;
   order: number;
   text: string;
+  bbox?: CellBbox;   // PDF: where this text line sits on the page
+  lineStart?: number; // TXT: 1-based line range of this paragraph
+  lineEnd?: number;
+};
+export type PdfPageInfo = {
+  page: number;
+  width: number;
+  height: number;
+  headerText: string | null;
+  lines: { text: string; bbox: CellBbox }[];
 };
 export type ParsedDoc = {
   pageCount: number | null;
   ocrRequired: boolean;
   sections: ParsedSection[];
   tables: ParsedTable[];
+  // True when a PDF fell back to pdf-parse (no table detector) because the
+  // Python sidecar was unreachable — disclosed on the document + in the UI.
+  tablesUnavailable?: boolean;
+  pdfPages?: PdfPageInfo[];
 };
 
 // ── PDF ──────────────────────────────────────────────────────────────────
@@ -39,6 +61,109 @@ export type ParsedDoc = {
 // "Footnotes"/"Notes" marker. Note: scanned PDFs without a text layer are
 // flagged ocrRequired — they surface as NEEDS_REVIEW rather than silently
 // pretending to be understood.
+// ── Python sidecar (python-pipelines) ─────────────────────────────
+// When PARSE_SERVICE_URL is set, PDFs go to the FastAPI sidecar, which
+// returns this same shape plus geometry (per-cell bboxes, per-page text
+// lines, context above tables). One retry covers free-tier cold starts
+// (90 s timeout per attempt); on failure we fall back to pdf-parse and
+// mark the document tablesUnavailable — the quality drop is disclosed,
+// never silent.
+type SidecarResponse = {
+  pageCount: number | null;
+  ocrRequired: boolean;
+  sections: { kind: 'HEADING' | 'PARAGRAPH'; level?: number; headingPath: string[]; page: number | null; order: number; text: string }[];
+  tables: {
+    page: number | null; order: number; title: string | null; sheet: string | null;
+    header: (string | { v: string })[] | null;
+    pageWidth?: number; pageHeight?: number; bbox?: CellBbox; contextAbove?: string[];
+    rows: { rowIndex: number; cells: (string | { v: string; ref?: string; f?: string })[]; bbox?: CellBbox; cellBboxes?: (CellBbox | null)[] | null }[];
+  }[];
+  pages?: { page: number; width: number; height: number; headerText: string | null; lines: { text: string; bbox: CellBbox }[] }[];
+};
+
+export async function parsePdfViaSidecar(buffer: Buffer, fileName: string): Promise<ParsedDoc> {
+  const url = `${config.parse.serviceUrl.replace(/\/+$/, '')}/parse?name=${encodeURIComponent(fileName)}`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' };
+  if (config.parse.token) headers['X-Pipeline-Token'] = config.parse.token;
+
+  const attempt = async (): Promise<SidecarResponse> => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: new Uint8Array(buffer),
+      signal: AbortSignal.timeout(90_000), // free-tier cold start can be slow
+    });
+    if (!res.ok) throw new Error(`parse sidecar responded ${res.status}`);
+    return (await res.json()) as SidecarResponse;
+  };
+
+  let json: SidecarResponse;
+  try {
+    json = await attempt();
+  } catch (err) {
+    logger.warn({ err: String(err) }, 'parse sidecar attempt 1 failed — retrying once');
+    json = await attempt(); // exactly one retry (cold starts / transient 5xx)
+  }
+
+  const pages = json.pages ?? [];
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+  // Attach line bboxes to sections by matching text on the page — the
+  // sidecar builds sections and lines from the same words, so a normalized
+  // exact match is expected; unmatched sections simply carry no bbox (the
+  // viewer then falls back to text search — never a fabricated highlight).
+  const sections: ParsedSection[] = json.sections.map((s) => {
+    const page = pages.find((p) => p.page === s.page);
+    const line = page?.lines.find((l) => norm(l.text) === norm(s.text));
+    return {
+      kind: s.kind,
+      level: s.level,
+      headingPath: s.headingPath,
+      page: s.page,
+      order: s.order,
+      text: s.text,
+      bbox: line?.bbox,
+    };
+  });
+
+  // PDF table cells become objects with a page/table/row/col ref and the
+  // cell's bbox — refs like "p3 t1 r5 c2" are what citations + evidence use.
+  const tables: ParsedTable[] = json.tables.map((t) => ({
+    sheet: t.sheet ?? undefined,
+    title: t.title ?? undefined,
+    page: t.page,
+    order: t.order,
+    header: t.header as (string | ParsedCell)[] | null,
+    pageWidth: t.pageWidth,
+    pageHeight: t.pageHeight,
+    bbox: t.bbox,
+    contextAbove: t.contextAbove,
+    rows: t.rows.map((r) => ({
+      rowIndex: r.rowIndex,
+      bbox: r.bbox,
+      cells: r.cells.map((c, i): string | ParsedCell => {
+        if (typeof c === 'string') return c;
+        if (c.ref) return { v: c.v, ref: c.ref, f: c.f, bbox: r.cellBboxes?.[i] ?? undefined };
+        return {
+          v: c.v,
+          ref: `p${t.page ?? 0} t${t.order} r${r.rowIndex} c${i}`,
+          f: c.f,
+          bbox: r.cellBboxes?.[i] ?? r.bbox,
+        };
+      }),
+    })),
+  }));
+
+  return {
+    pageCount: json.pageCount,
+    ocrRequired: json.ocrRequired,
+    sections,
+    tables,
+    tablesUnavailable: false,
+    pdfPages: pages,
+  };
+}
+
 async function parsePdf(filePath: string): Promise<ParsedDoc> {
   // pdf-parse returns a Promise — it MUST be awaited (previously it wasn't,
   // so data.text was undefined and every real PDF upload crashed with
@@ -193,11 +318,28 @@ function parseSheet(buffer: Buffer, baseName: string): ParsedDoc {
 // ── Plain text ───────────────────────────────────────────────────────────
 function parseTxt(buffer: Buffer): ParsedDoc {
   const text = buffer.toString('utf8');
-  const blocks = text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const lines = text.split('\n');
+  // Paragraphs separated by blank lines, each tracking its 1-based line
+  // range so evidence regions can highlight the exact lines.
+  const sections: ParsedSection[] = [];
+  let i = 0;
+  let order = 0;
+  while (i < lines.length) {
+    while (i < lines.length && !lines[i].trim()) i++;
+    const start = i;
+    const body: string[] = [];
+    while (i < lines.length && lines[i].trim()) body.push(lines[i].trim());
+    if (body.length) {
+      sections.push({
+        kind: 'PARAGRAPH', headingPath: [], page: 1, order: order++,
+        text: body.join('\n'), lineStart: start + 1, lineEnd: i,
+      });
+    }
+  }
   return {
     pageCount: 1,
-    ocrRequired: blocks.length === 0,
-    sections: blocks.map((b, i) => ({ kind: 'PARAGRAPH' as const, headingPath: [], page: 1, order: i, text: b })),
+    ocrRequired: sections.length === 0,
+    sections,
     tables: [],
   };
 }
@@ -205,8 +347,21 @@ function parseTxt(buffer: Buffer): ParsedDoc {
 // ── Dispatch ────────────────────────────────────────────────────────────
 export async function parseDocument(filePath: string, ext: string, baseName: string): Promise<ParsedDoc> {
   switch (ext) {
-    case 'pdf':
+    case 'pdf': {
+      if (config.parse.serviceUrl) {
+        try {
+          return await parsePdfViaSidecar(fs.readFileSync(filePath), `${baseName}.pdf`);
+        } catch (err) {
+          // Sidecar unreachable/failed after one retry: fall back to pdf-parse
+          // (no table detection) and mark the document so the UI and
+          // extraction reasons can disclose the reduced fidelity.
+          logger.warn({ err: String(err) }, 'PDF parse sidecar failed — falling back to pdf-parse');
+          const doc = await parsePdf(filePath);
+          return { ...doc, tablesUnavailable: true };
+        }
+      }
       return parsePdf(filePath);
+    }
     case 'docx':
     case 'doc':
       // .doc (legacy) parsing is best-effort via mammoth; convert beforehand for best results

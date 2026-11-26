@@ -341,7 +341,10 @@ function TaskDetail({ taskId, onClose, canEdit, canReview }: {
                     </td>
                     <td><Confidence value={r.confidence} /></td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      {r.page ? `p.${r.page}` : r.sheet ? `${r.sheet}${r.cell ? ` ${r.cell}` : ''}` : '—'}
+                      {r.page ? `p.${r.page}` : r.sheet ? r.sheet : '—'}{r.cell ? ` · ${r.cell}` : ''}
+                      {r.note ? (
+                        <div style={{ fontSize: 10.5, color: 'var(--warning, #9a6700)', marginTop: 2, maxWidth: 230 }} title={r.note}>⚑ {r.note}</div>
+                      ) : null}
                     </td>
                     <td>
                       {r.flagged && r.status === 'NEEDS_REVIEW' ? (

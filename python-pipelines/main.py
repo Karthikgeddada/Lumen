@@ -13,6 +13,15 @@ Response contract mirrors the Node ParsedDoc shape exactly:
                 "rows": [{"rowIndex": int, "cells": [str | {"v": str, "ref": str, "f": str}]}]}]
 }
 
+PDF responses additionally carry geometry (all additive keys, ignored by
+older Node callers):
+  "pages": [{"page": int, "width": float, "height": float, "headerText": str|null,
+             "lines": [{"text": str, "bbox": {"x0","top","x1","bottom"}}]}]
+  tables gain "pageWidth", "pageHeight", "bbox", "contextAbove" (the ~3
+  nearest text lines above the table — where "(in thousands)" lives), and each
+  row gains "bbox" + "cellBboxes" (aligned per-cell rects; null when the
+  detected grid does not align 1:1 with the extracted cells — never guessed).
+
 Run locally:  uvicorn main:app --port 8100
 Call:         curl --data-binary @doc.pdf -H "Content-Type: application/octet-stream" \n              -H "X-Pipeline-Token: $PIPELINES_TOKEN" "localhost:8100/parse?name=doc.pdf"
 """
@@ -51,6 +60,7 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
 
     sections: list[dict[str, Any]] = []
     tables: list[dict[str, Any]] = []
+    pages_out: list[dict[str, Any]] = []
     order = 0
     t_order = 0
     page_count = 0
@@ -63,24 +73,38 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
             # Font-size-aware heading detection: a line rendered clearly
             # larger than the page's median text size is a heading.
             words = page.extract_words(extra_attrs=["size"])
-            lines: dict[int, list[tuple[float, str, float]]] = {}
+            raw: dict[int, list[tuple[float, float, str, float, float, float]]] = {}
             for w in words:
                 key = round(w["top"] / 3)
-                lines.setdefault(key, []).append((w["x0"], w["text"], w["size"]))
-            sizes = [s for ws in lines.values() for _, _, s in ws]
+                raw.setdefault(key, []).append((w["x0"], w["top"], w["text"], w["size"], w["x1"], w["bottom"]))
+            sizes = [s for ws in raw.values() for _, _, _, s, _, _ in ws]
             body_size = statistics.median(sizes) if sizes else 0
 
-            for key in sorted(lines):
+            # Text lines with bboxes — the geometry evidence regions use.
+            lines: list[dict[str, Any]] = []
+            for key in sorted(raw):
                 # Order words by x0 (reading order) — never by their text.
-                ws = sorted(lines[key], key=lambda x: x[0])
-                text = " ".join(t for _, t, _ in ws).strip()
-                max_size = max(s for _, _, s in ws)
+                ws = sorted(raw[key], key=lambda x: x[0])
+                text = " ".join(t for _, _, t, _, _, _ in ws).strip()
                 if not text:
                     continue
+                lines.append({
+                    "text": text,
+                    "size": max(s for _, _, _, s, _, _ in ws),
+                    "bbox": {
+                        "x0": min(w[0] for w in ws),
+                        "top": min(w[1] for w in ws),
+                        "x1": max(w[4] for w in ws),
+                        "bottom": max(w[5] for w in ws),
+                    },
+                })
+
+            for line in lines:
+                text = line["text"]
                 total_chars += len(text)
-                is_heading = body_size and max_size >= body_size * 1.15 and len(text) <= 120
+                is_heading = body_size and line["size"] >= body_size * 1.15 and len(text) <= 120
                 if is_heading:
-                    level = 2 if max_size < body_size * 1.5 else 1
+                    level = 2 if line["size"] < body_size * 1.5 else 1
                     heading_path = heading_path[: level - 1] + [text]
                     sections.append({"kind": "HEADING", "level": level, "headingPath": list(heading_path),
                                      "page": pno, "order": order, "text": text})
@@ -89,20 +113,55 @@ def parse_pdf(data: bytes, base_name: str) -> dict[str, Any]:
                                      "page": pno, "order": order, "text": text})
                 order += 1
 
-            for tbl in page.extract_tables() or []:
-                rows = [[(c or "").strip() for c in row] for row in tbl]
+            for tbl in page.find_tables() or []:
+                rows = [[(c or "").strip() for c in row] for row in tbl.extract()]
                 rows = [r for r in rows if any(c for c in r)]
                 if not rows:
                     continue
                 header, body = rows[0], rows[1:]
+                tb = tbl.bbox  # (x0, top, x1, bottom)
+                # Nearest ~3 text lines above the table — scale headers like
+                # "(in thousands, except per share data)" sit right here.
+                above = [l for l in lines if l["bbox"]["bottom"] <= tb[1]]
+                context_above = [l["text"] for l in above[-3:]]
+
+                # Per-cell bboxes from the detected grid, grouped by row top.
+                grid: dict[float, list[tuple[float, float, float, float]]] = {}
+                for (x0, top, x1, bottom) in tbl.cells:
+                    grid.setdefault(round(top, 1), []).append((x0, top, x1, bottom))
+                tops = sorted(grid)
+                rows_out = []
+                for i, r in enumerate(body):
+                    cell_bboxes = None
+                    gi = i + 1  # grid row 0 corresponds to the header row
+                    if gi < len(tops):
+                        grp = sorted(grid[tops[gi]], key=lambda c: c[0])
+                        if len(grp) == len(r):  # aligns 1:1 — else null, never guessed
+                            cell_bboxes = [
+                                {"x0": c[0], "top": c[1], "x1": c[2], "bottom": c[3]} for c in grp
+                            ]
+                    rows_out.append({
+                        "rowIndex": i, "cells": r,
+                        "bbox": {"x0": tb[0], "top": tb[1], "x1": tb[2], "bottom": tb[3]},
+                        "cellBboxes": cell_bboxes,
+                    })
                 tables.append({"page": pno, "order": t_order,
                                "title": heading_path[-1] if heading_path else base_name,
                                "sheet": None, "header": header,
-                               "rows": [{"rowIndex": i, "cells": r} for i, r in enumerate(body)]})
+                               "pageWidth": float(page.width), "pageHeight": float(page.height),
+                               "bbox": {"x0": tb[0], "top": tb[1], "x1": tb[2], "bottom": tb[3]},
+                               "contextAbove": context_above,
+                               "rows": rows_out})
                 t_order += 1
 
+            pages_out.append({
+                "page": pno, "width": float(page.width), "height": float(page.height),
+                "headerText": lines[0]["text"] if lines else None,
+                "lines": [{"text": l["text"], "bbox": l["bbox"]} for l in lines],
+            })
+
     return {"pageCount": page_count, "ocrRequired": total_chars == 0,
-            "sections": sections, "tables": tables}
+            "sections": sections, "tables": tables, "pages": pages_out}
 
 
 # ── DOCX ───────────────────────────────────────────────────────────────

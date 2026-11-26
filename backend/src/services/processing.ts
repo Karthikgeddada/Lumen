@@ -81,6 +81,10 @@ export async function processDocument(documentId: string): Promise<void> {
           page: t.page ?? null,
           order: t.order,
           header: (t.header as unknown) ?? undefined,
+          pageWidth: t.pageWidth ?? null,
+          pageHeight: t.pageHeight ?? null,
+          bbox: (t.bbox as unknown as Prisma.InputJsonValue) ?? undefined,
+          contextAbove: (t.contextAbove as unknown as Prisma.InputJsonValue) ?? undefined,
         },
       });
       tableIdByIndex.set(i, created.id);
@@ -114,6 +118,7 @@ export async function processDocument(documentId: string): Promise<void> {
           kind: d.kind,
           text: d.text,
           tokenEstimate: estimateTokens(d.text),
+          regions: (d.regions as unknown as Prisma.InputJsonValue) ?? undefined,
         })),
       });
       void res;
@@ -192,6 +197,7 @@ export async function processDocument(documentId: string): Promise<void> {
       data: {
         status: 'COMPLETED',
         pageCount: parsed.pageCount,
+        tablesUnavailable: parsed.tablesUnavailable ?? false,
         processedAt: new Date(),
         error: null,
       },

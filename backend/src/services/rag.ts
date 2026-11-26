@@ -18,6 +18,7 @@ export type RetrievedChunk = {
   tableId: string | null;
   text: string;
   embedding: number[] | null;
+  regions: unknown[] | null; // evidence geometry for the viewer (PDF bboxes | DOCX paragraph | XLSX range | TXT lines)
   score: number;
 };
 
@@ -102,7 +103,7 @@ export async function retrieve(
   type VecRow = {
     id: string; documentId: string; page: number | null; sheet: string | null;
     headingPath: string[] | null; kind: string; tableId: string | null;
-    text: string; documentName: string; embscore: number;
+    text: string; documentName: string; regions: unknown | null; embscore: number;
   };
   let vecRows: VecRow[] = [];
   if (queryEmb) {
@@ -111,7 +112,7 @@ export async function retrieve(
       vecRows = await prisma.$queryRaw<VecRow[]>`
         SELECT c.id, c."documentId" AS "documentId", c.page, c.sheet,
                c."headingPath" AS "headingPath", c.kind::text AS kind, c."tableId" AS "tableId",
-               c.text, d.name AS "documentName",
+               c.text, c.regions, d.name AS "documentName",
                1 - (c.emb <=> ${vecLiteral}::vector) AS embscore
         FROM "DocumentChunk" c
         JOIN "Document" d ON d.id = c."documentId"
@@ -137,7 +138,7 @@ export async function retrieve(
       : where,
     select: {
       id: true, page: true, sheet: true, headingPath: true, kind: true, tableId: true,
-      text: true, embedding: true, documentId: true,
+      text: true, embedding: true, documentId: true, regions: true,
       document: { select: { name: true } },
     },
     take: vecRows.length ? 300 : 2000,
@@ -158,6 +159,7 @@ export async function retrieve(
       tableId: c.tableId,
       text: c.text,
       embedding: emb,
+      regions: (c.regions as unknown[] | null) ?? null,
       score: 0,
       _kw: keywordScore(c.text, terms, query),
       _emb: queryEmb && emb ? cosine(queryEmb, emb) : 0,
@@ -181,6 +183,7 @@ export async function retrieve(
         tableId: v.tableId,
         text: v.text,
         embedding: null, // not needed downstream; the pgvector score is used
+        regions: (v.regions as unknown[] | null) ?? null,
         score: 0,
         _kw: 0, // may still be re-scored below if it also matched keywords
         _emb: embScore,
@@ -217,7 +220,7 @@ export async function retrieve(
         where,
         select: {
           id: true, page: true, sheet: true, headingPath: true, kind: true, tableId: true,
-          text: true, embedding: true, documentId: true,
+          text: true, embedding: true, documentId: true, regions: true,
           document: { select: { name: true } },
         },
         orderBy: [{ documentId: 'asc' }, { page: 'asc' }],
@@ -238,6 +241,7 @@ export async function retrieve(
       tableId: c.tableId,
       text: c.text,
       embedding: c.embedding as number[] | null,
+      regions: (c.regions as unknown[] | null) ?? null,
       score: 0,
     }));
 }

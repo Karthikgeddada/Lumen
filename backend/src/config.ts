@@ -54,6 +54,16 @@ export const config = {
     secretKey: process.env.STORAGE_SECRET_KEY || '',
   },
 
+  parse: {
+    // Optional Python sidecar (python-pipelines) for richer PDF parsing:
+    // tables with per-cell bboxes, per-page text lines, and the text above
+    // each table (where "(in thousands)" lives). When unset or unreachable,
+    // the Node pdf-parse fallback runs and the document is honestly marked
+    // tablesUnavailable — never a silent quality drop.
+    serviceUrl: process.env.PARSE_SERVICE_URL || '',
+    token: process.env.PIPELINES_TOKEN || '',
+  },
+
   maxUploadBytes: num(process.env.MAX_UPLOAD_MB, 500) * 1024 * 1024,
 
   // Access token: short-lived, kept in memory on the client.
