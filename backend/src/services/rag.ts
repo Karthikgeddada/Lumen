@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import { embed, hasAI } from './ai';
 import { logger } from '../logger';
@@ -85,8 +86,52 @@ export async function retrieve(
 
   const terms = queryTerms(query);
 
-  // Candidate set: keyword-matched chunks (bounded), so huge workspaces stay fast.
-  let candidatePool = await prisma.documentChunk.findMany({
+  // Embed the query once; when it and a pgvector column exist, Postgres does
+  // the semantic search (HNSW cosine index) and we pull only top-N rows
+  // instead of shipping every candidate's text to the app.
+  let queryEmb: number[] | null = null;
+  if (hasAI()) {
+    try {
+      [queryEmb] = await embed([query]);
+    } catch (e) {
+      logger.warn({ err: String(e) }, 'embedding failed — falling back to keyword ranking');
+    }
+  }
+
+  // Semantically nearest chunks, straight from the HNSW index (cosine).
+  type VecRow = {
+    id: string; documentId: string; page: number | null; sheet: string | null;
+    headingPath: string[] | null; kind: string; tableId: string | null;
+    text: string; documentName: string; embscore: number;
+  };
+  let vecRows: VecRow[] = [];
+  if (queryEmb) {
+    const vecLiteral = `[${queryEmb.join(',')}]`;
+    try {
+      vecRows = await prisma.$queryRaw<VecRow[]>`
+        SELECT c.id, c."documentId" AS "documentId", c.page, c.sheet,
+               c."headingPath" AS "headingPath", c.kind::text AS kind, c."tableId" AS "tableId",
+               c.text, d.name AS "documentName",
+               1 - (c.emb <=> ${vecLiteral}::vector) AS embscore
+        FROM "DocumentChunk" c
+        JOIN "Document" d ON d.id = c."documentId"
+        WHERE d."workspaceId" = ${workspaceId} AND d."deletedAt" IS NULL AND d.status = 'COMPLETED'
+          AND c.emb IS NOT NULL
+          ${scope.documentIds?.length ? Prisma.sql`AND c."documentId" = ANY(${scope.documentIds})` : Prisma.empty}
+          ${scope.collectionId ? Prisma.sql`AND d."collectionId" = ${scope.collectionId}` : Prisma.empty}
+        ORDER BY c.emb <=> ${vecLiteral}::vector
+        LIMIT 60
+      `;
+    } catch (e) {
+      logger.warn({ err: String(e) }, 'pgvector search failed — using keyword path');
+      vecRows = [];
+    }
+  }
+
+  // Keyword-matched candidates — now backed by the trigram GIN index, this
+  // is no longer a sequential scan. Bounded smaller when semantic search
+  // already supplied strong candidates.
+  const kwPool = await prisma.documentChunk.findMany({
     where: terms.length
       ? { ...where, OR: terms.map((t) => ({ text: { contains: t, mode: 'insensitive' as const } })) }
       : where,
@@ -95,40 +140,14 @@ export async function retrieve(
       text: true, embedding: true, documentId: true,
       document: { select: { name: true } },
     },
-    take: 2000,
+    take: vecRows.length ? 300 : 2000,
   });
 
-  // The keyword candidate query can legitimately match nothing (phrased question
-  // whose words never appear verbatim, and chunks without embeddings). Retry
-  // without the keyword filter so the scoped documents' real content is still
-  // available to the model instead of a false "no evidence".
-  if (!candidatePool.length && terms.length) {
-    candidatePool = await prisma.documentChunk.findMany({
-      where,
-      select: {
-        id: true, page: true, sheet: true, headingPath: true, kind: true, tableId: true,
-        text: true, embedding: true, documentId: true,
-        document: { select: { name: true } },
-      },
-      orderBy: [{ documentId: 'asc' }, { page: 'asc' }],
-      take: 50,
-    });
-  }
+  const byId = new Map<string, RetrievedChunk & { _kw: number; _emb: number }>();
 
-  let queryEmb: number[] | null = null;
-  if (hasAI() && candidatePool.some((c) => c.embedding)) {
-    try {
-      [queryEmb] = await embed([query]);
-    } catch (e) {
-      logger.warn({ err: String(e) }, 'embedding failed — falling back to keyword ranking');
-    }
-  }
-
-  const scored: RetrievedChunk[] = candidatePool.map((c) => {
+  for (const c of kwPool) {
     const emb = (c.embedding as number[] | null) ?? null;
-    const embScore = queryEmb && emb ? cosine(queryEmb, emb) : 0;
-    const kw = keywordScore(c.text, terms, query);
-    return {
+    byId.set(c.id, {
       chunkId: c.id,
       documentId: c.documentId,
       documentName: c.document.name,
@@ -139,8 +158,48 @@ export async function retrieve(
       tableId: c.tableId,
       text: c.text,
       embedding: emb,
-      score: kw + embScore * 6,
-    };
+      score: 0,
+      _kw: keywordScore(c.text, terms, query),
+      _emb: queryEmb && emb ? cosine(queryEmb, emb) : 0,
+    });
+  }
+
+  for (const v of vecRows) {
+    const existing = byId.get(v.id);
+    const embScore = Math.max(0, v.embscore);
+    if (existing) {
+      existing._emb = Math.max(existing._emb, embScore);
+    } else {
+      byId.set(v.id, {
+        chunkId: v.id,
+        documentId: v.documentId,
+        documentName: v.documentName,
+        page: v.page,
+        sheet: v.sheet,
+        headingPath: v.headingPath ?? [],
+        kind: v.kind,
+        tableId: v.tableId,
+        text: v.text,
+        embedding: null, // not needed downstream; the pgvector score is used
+        score: 0,
+        _kw: 0, // may still be re-scored below if it also matched keywords
+        _emb: embScore,
+      });
+    }
+  }
+
+  // Re-run keyword scoring on vector-only rows so phrase hits aren't lost.
+  if (terms.length && vecRows.length) {
+    for (const v of vecRows) {
+      const row = byId.get(v.id);
+      if (row && row._kw === 0) row._kw = keywordScore(row.text, terms, query);
+    }
+  }
+
+  const scored = [...byId.values()].map((c) => {
+    const { _kw, _emb, ...rest } = c;
+    void _kw; void _emb;
+    return { ...rest, score: c._kw + c._emb * 6 };
   });
 
   scored.sort((a, b) => b.score - a.score);
@@ -152,6 +211,18 @@ export async function retrieve(
   // while the scoped documents demonstrably have content, show the model the
   // first chunks of those documents — it can then answer from real text, or
   // honestly say the documents do not cover the question.
+  const candidatePool = kwPool.length
+    ? kwPool
+    : await prisma.documentChunk.findMany({
+        where,
+        select: {
+          id: true, page: true, sheet: true, headingPath: true, kind: true, tableId: true,
+          text: true, embedding: true, documentId: true,
+          document: { select: { name: true } },
+        },
+        orderBy: [{ documentId: 'asc' }, { page: 'asc' }],
+        take: 50,
+      });
   return candidatePool
     .slice()
     .sort((a, b) => (a.page ?? 0) - (b.page ?? 0))

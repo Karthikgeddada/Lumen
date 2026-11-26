@@ -139,6 +139,17 @@ export async function processDocument(documentId: string): Promise<void> {
             ),
           );
         }
+        // Mirror the Json embeddings into the pgvector column (indexed HNSW
+        // cosine search) — the Json column stays the source of truth. Rows
+        // whose dims don't match 384 are skipped, never errored.
+        await prisma.$executeRaw`
+          UPDATE "DocumentChunk"
+          SET "emb" = ("embedding"::text)::vector
+          WHERE "documentId" = ${documentId}
+            AND "emb" IS NULL
+            AND "embedding" IS NOT NULL
+            AND jsonb_array_length("embedding") = 384
+        `;
       } catch (e) {
         logger.warn({ err: String(e), documentId }, 'embedding skipped');
       }

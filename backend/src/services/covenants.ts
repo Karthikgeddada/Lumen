@@ -2,6 +2,7 @@ import { prisma } from '../prisma';
 import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
+import { sendCovenantBreachEmail } from './mailer';
 
 // Covenant intelligence: extract covenant definitions from credit agreements
 // (grounded in the actual clauses), then test each quarter's observed metrics
@@ -215,7 +216,7 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
   if (freshBreaches > 0) {
     const members = await prisma.membership.findMany({
       where: { workspaceId, deletedAt: null },
-      select: { userId: true },
+      select: { userId: true, user: { select: { email: true } } },
     });
     const entity = await prisma.entity.findUnique({ where: { id: entityId }, select: { name: true } });
     const data = members.map((m) => ({
@@ -229,6 +230,20 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
     if (data.length) {
       await prisma.notification.createMany({ data }).catch((err) => logger.error({ err }, 'covenant breach notification failed'));
     }
+    // Email alert too (same freshness rule) — no-ops in dev mode or when SMTP
+    // isn't configured; one mail per member, failures never break the test run.
+    await Promise.all(
+      members.map((m) =>
+        sendCovenantBreachEmail(
+          m.user.email,
+          entity?.name ?? 'Entity',
+          targetPeriod,
+          freshBreaches,
+          failed,
+          definitions.length,
+        ).catch((err) => logger.error({ err }, 'covenant breach email failed')),
+      ),
+    );
   }
 
   return { tested: passed + failed, passed, failed, notTested, period: targetPeriod, results };

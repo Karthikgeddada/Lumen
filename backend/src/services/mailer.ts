@@ -70,3 +70,25 @@ export async function sendInvitation(
     `${inviterName} invited you to ${workspaceName} on Lumen. Accept: ${acceptUrl}`,
   );
 }
+
+// Fresh covenant breach alert — sent only when a covenant NEWLY fails, so
+// re-tests never spam. Sent in addition to the in-app notification.
+export async function sendCovenantBreachEmail(
+  to: string,
+  entityName: string,
+  period: string,
+  freshBreaches: number,
+  totalFailing: number,
+  totalCovenants: number,
+) {
+  await send(
+    to,
+    `⚠ ${freshBreaches} covenant breach — ${entityName} (${period})`,
+    shell('Covenant breach detected',
+      `<p><strong>${entityName}</strong> — period <strong>${period}</strong>:</p>
+      <p>${freshBreaches} of ${totalCovenants} covenants ${freshBreaches === 1 ? 'has newly breached' : 'have newly breached'} (${totalFailing} total failing).</p>
+      <p><a href="${config.frontendUrl}/covenants" style="display:inline-block;background:#0071E3;color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:500">Open Covenants</a></p>
+      <p style="color:#6E6E73">You're receiving this because you're an active member of this workspace. Automatic compliance re-testing triggered this alert.</p>`),
+    `${entityName} — ${period}: ${freshBreaches} of ${totalCovenants} covenants newly breached (${totalFailing} total failing).`,
+  );
+}

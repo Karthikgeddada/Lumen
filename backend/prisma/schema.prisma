@@ -341,6 +341,7 @@ model DocumentChunk {
   kind        CitationKind @default(PARAGRAPH)
   text        String  @db.Text
   embedding   Json?   // float array (re-ranked via cosine when present)
+  emb         Unsupported("vector")? // pgvector mirror of embedding, HNSW-indexed — raw SQL only
   tokenEstimate Int
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
