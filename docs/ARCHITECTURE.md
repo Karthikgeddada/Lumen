@@ -111,3 +111,18 @@ Supabase Storage (current S3 target): bucket `lumen-documents`, region `ap-north
 - `RUN_REPORT` job type exists; the Reports surface (`Report` model) is minimal
 - Keep-alive pings and Supabase S3 env vars are ops tasks, not code
 - Phase 0 trust items: key rotation, private AI path, always-on backend (ping workaround active)
+- Column-level scale detection is header-text-only (a scale buried mid-table in prose may be missed — such figures get the conservative missing-scale flag); per-share exemption is by unit/value shape, not semantic
+
+## 9. Unit-Scale Detection (services/scale.ts + scaleEnrich.ts, 2026-11-26)
+
+**Flow:** extraction completes → `enrichResultsWithScale(taskId)` loads each document's tables (title/header/page/sheet) and page texts → detects declared scales ("in thousands", "$ millions", "000s", "$ in 000", billions/trillions, currency-prefixed forms; anchored patterns never match plain numbers) at table, page, and document level → `decideScale` resolves **one** scale per figure by precedence — value's own suffix > extractor unit > table header > page header > document header; never stacked → provenance (multiplier, label, where found, header text, page/sheet/tableId) stored as `scale` JSONB on the extraction result, with `flagged` + `note` for conflicts and missing scale on currency figures → at analytics ingest the reviewed scale is applied exactly once and carried onto the metric observation.
+
+**Exemptions:** ratios, multiples (4.5x), percentages, and per-share figures are never scaled ("in thousands, except per share data" handled by unit/value shape).
+
+**Guarantees:** enrichment is best-effort (never fails an extraction); scale.ts is pure (no DB/env imports) so its tests run anywhere; conflicts and absences flag for review instead of guessing.
+
+## 10. Tests & CI (2026-11-26)
+
+- `npm test` (backend) runs Vitest: 58 tests — 25 canonical normalizer cases, 12 mandated scale cases (thousands/millions/billions/"000s"/"$ in 000"/mixed/per-share exception/double-scaling guard/missing scale/conflicting scales/unit-vs-table precedence/ratio exemption), plus pattern and detailed-parse checks. Files: `src/services/normalizer.test.ts`, `src/services/scale.test.ts`.
+- `npm run typecheck` (backend) and `npx tsc --noEmit` (frontend) gate both apps.
+- GitHub Actions (`.github/workflows/ci.yml`) runs backend `npm ci → prisma generate → typecheck → test` and frontend `npm ci → tsc --noEmit` on every push and pull request (free tier).
