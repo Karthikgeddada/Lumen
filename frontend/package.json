@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run"
   },
   "dependencies": {
     "echarts": "^6.1.0",
@@ -18,8 +19,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.15",
-    "@types/react": "18.3.5",
-    "@types/react-dom": "18.3.0",
-    "typescript": "^5.5.4"
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.2"
   }
 }

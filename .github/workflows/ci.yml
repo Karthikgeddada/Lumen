@@ -39,6 +39,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      - run: npm test
 
   # Python parse sidecar: /parse contract incl. PDF geometry (bboxes,
   # contextAbove, page lines). Fixtures are generated in-memory, no binaries.

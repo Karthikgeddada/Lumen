@@ -428,3 +428,38 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ── Charts (registry-driven Chart component) ─────────────────── */
+/* Tooltip is themed by the registered 'lumen' echarts theme; these styles
+   shape it and keep figures tabular. States are height-stable — no layout
+   shift between loading, refusal and rendered chart. */
+.lumen-chart-tooltip {
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  max-width: 340px;
+  white-space: normal;
+}
+.chart-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.chart-state p { font-size: 12.5px; color: var(--text-muted); margin: 0; text-align: center; }
+.chart-state code { font-size: 11.5px; }
+.chart-caution { font-size: 11px; color: var(--text-muted); margin: 6px 2px 0; }
+.chart-skeleton {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-lg);
+  background: linear-gradient(100deg, var(--blue-tint) 8%, var(--surface) 42%, var(--blue-tint) 60%);
+  background-size: 220% 100%;
+  animation: chart-shimmer 1.5s linear infinite;
+}
+@keyframes chart-shimmer { to { background-position: -220% 0; } }
