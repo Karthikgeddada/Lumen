@@ -12,7 +12,7 @@ import {
   CovenantTerms,
   ScheduleStep,
   NearBreachInfo,
-} from './ttm';
+} from '../analytics/ttm';
 
 // Covenant intelligence: extract covenant definitions from credit agreements
 // (grounded in the actual clauses), then test each quarter's observed metrics

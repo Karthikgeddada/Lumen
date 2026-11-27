@@ -5,7 +5,7 @@
 
 import { prisma } from '../prisma';
 import { parseNumericValueDetailed } from './normalizer';
-import { previousQuarter } from './periods';
+import { previousQuarter } from '../analytics/periods';
 import { ValidationConfig, Figure, validateFigures } from './validation';
 
 // ── Orchestration: run over a task's results and persist flags ─────────

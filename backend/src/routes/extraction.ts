@@ -8,7 +8,7 @@ import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { audit } from '../utils';
 import { enqueue } from '../services/queue';
 import { runExtraction, suggestFields } from '../services/extract';
-import { ingestFromExtraction } from '../services/analytics';
+import { ingestFromExtraction } from '../analytics/overview';
 import { applyScaleResolution, scaleFlags, scaleUnresolved } from '../services/trust';
 
 const router = Router();

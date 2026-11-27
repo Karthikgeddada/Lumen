@@ -1,7 +1,12 @@
 # Phase: accuracy, trust, evidence & analytics — progress checklist
 
-Branch: `phase/accuracy-evidence` (merge to main once, at the end, when CI is green).
+Branch: `feat/chart-engine` (merge to main once, at the end, when CI is green).
 Update after every item; commit + push each time. On restart: resume the first unchecked item.
+
+## CHART ENGINE (2026-11-27 build directive; directive text arrived truncated — items 0–1 built, later items pending re-issue)
+- [x] 0. pipelines CI job: command was already `pytest -q`; job failed with pytest exit 2 (collection interrupted) on GH runners only, 9/9 pass locally with exact command + pins. Fix: run pytest in a fresh venv; branch CI confirmation pending — see DECISIONS.md.
+- [x] 1. Analytics module restructure (move-only): mounts.ts single source of truth; routeTable.test.ts walks routers without listen() and pins an inline snapshot of METHOD /api/... (192/192 Vitest, tsc clean). analytics/{overview,periods,ttm,formula}.ts moved via git mv + import-only edits; validation*/covenants deliberately stay in services (see DECISIONS.md).
+- [ ] 2+. REMAINING ITEMS UNKNOWN — the build directive message was cut off mid-item-1; awaiting the rest.
 
 ## A. Close-outs
 - [x] A1 Wrong backend URL: DEPLOYMENT.md → `lumen-api-ctpy.onrender.com`; README verified — contains no API URL at all (nothing to fix). Credentialed-request risk assessed in DECISIONS.md.

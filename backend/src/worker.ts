@@ -5,7 +5,7 @@ import { claimJob, completeJob, failJob, requeueStaleJobs, newWorkerId } from '.
 import { processDocument } from './services/processing';
 import { runExtraction } from './services/extract';
 import { draftQuestionnaire } from './services/questionnaire';
-import { dueReports, runReport } from './services/analytics';
+import { dueReports, runReport } from './analytics/overview';
 
 // Background worker: polls the Postgres job queue and runs document
 // processing, extraction runs, questionnaire drafting and scheduled reports.

@@ -5,7 +5,7 @@ import { ApiError, asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { runCovenantTests } from '../services/covenants';
 import { audit } from '../utils';
-import { entityOverview } from '../services/analytics';
+import { entityOverview } from '../analytics/overview';
 
 const router = Router();
 

@@ -5,19 +5,7 @@ import cookieParser from 'cookie-parser';
 import { config } from './config';
 import { logger } from './logger';
 import { generalLimiter, errorHandler, notFoundHandler } from './middleware/error';
-import authRoutes from './routes/auth';
-import workspaceRoutes from './routes/workspaces';
-import collectionRoutes from './routes/collections';
-import documentRoutes from './routes/documents';
-import searchRoutes from './routes/search';
-import conversationRoutes from './routes/conversations';
-import extractionRoutes from './routes/extraction';
-import questionnaireRoutes from './routes/questionnaires';
-import analyticsRoutes from './routes/analytics';
-import dashboardRoutes from './routes/dashboard';
-import notificationRoutes from './routes/notifications';
-import covenantRoutes from './routes/covenants';
-import qualityRoutes from './routes/quality';
+import { MOUNTS } from './routes/mounts';
 
 const app = express();
 
@@ -58,20 +46,9 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'lumen-api', env: config.env, uptime: process.uptime() });
 });
 
-// ── API routes ────────────────────────────────────────────────────
-app.use('/api/auth', generalLimiter, authRoutes);
-app.use('/api/workspaces', generalLimiter, workspaceRoutes);
-app.use('/api/workspaces/:workspaceId/collections', generalLimiter, collectionRoutes);
-app.use('/api/workspaces/:workspaceId/documents', generalLimiter, documentRoutes);
-app.use('/api/workspaces/:workspaceId/search', generalLimiter, searchRoutes);
-app.use('/api', generalLimiter, conversationRoutes);
-app.use('/api', generalLimiter, extractionRoutes);
-app.use('/api', generalLimiter, questionnaireRoutes);
-app.use('/api', generalLimiter, analyticsRoutes);
-app.use('/api', generalLimiter, covenantRoutes);
-app.use('/api', generalLimiter, qualityRoutes);
-app.use('/api', generalLimiter, dashboardRoutes);
-app.use('/api/notifications', generalLimiter, notificationRoutes);
+// ── API routes ── mounted from the single source of truth in routes/mounts.ts
+// (same prefixes, same order, same shared rate limiter as before).
+for (const { prefix, router } of MOUNTS) app.use(prefix, generalLimiter, router);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

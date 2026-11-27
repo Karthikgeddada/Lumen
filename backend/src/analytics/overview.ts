@@ -1,8 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
-import { parseNumericValueDetailed } from './normalizer';
-import { runCovenantTests } from './covenants';
-import { ingestConflict, IngestConflict, sameNumber, scaleUnresolved } from './trust';
+import { parseNumericValueDetailed } from '../services/normalizer';
+import { runCovenantTests } from '../services/covenants';
+import { ingestConflict, IngestConflict, sameNumber, scaleUnresolved } from '../services/trust';
 
 // Analytics are derived from actual stored data — extraction results and
 // metric observations — and every value keeps its derivation (REPORTED /

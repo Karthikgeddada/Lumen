@@ -19,7 +19,7 @@
 // Pure core ONLY — importing this file must not pull in prisma/config (unit
 // tests import it without a database). DB orchestration lives in validationRun.ts.
 
-import { parsePeriod, previousQuarter } from './periods';
+import { parsePeriod, previousQuarter } from '../analytics/periods';
 
 // ── Config (WorkspaceSetting key "validation.rules") ──────────────────
 export type ValidationConfig = {
