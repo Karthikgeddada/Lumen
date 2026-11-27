@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Award } from 'lucide-react';
 import { EmptyState } from '../../../components/ui';
 
@@ -10,6 +11,11 @@ export default function Certificates() {
         <div>
           <div className="page-title">Certificates</div>
           <div className="page-desc">Compliance and borrowing-base certificates by company.</div>
+        </div>
+        {/* Tab pair with Covenants — certificates' final home is a tab here (spec). */}
+        <div className="tabs">
+          <Link href="/covenants" className="tab">Covenant tests</Link>
+          <Link href="/certificates" className="tab active">Certificates</Link>
         </div>
       </div>
       <div className="card">

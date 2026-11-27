@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import useSWR from 'swr';
 import {
   Scale, Plus, FileSearch, Play, Trash2, ShieldCheck, ShieldAlert, FileText, Building2, History, Sigma, ClipboardList,
@@ -75,7 +76,13 @@ export default function Covenants() {
           <div className="page-title">Covenants</div>
           <div className="page-desc">Extract covenant tests from credit agreements, then test every quarter automatically — every threshold traced to its clause.</div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {/* Certificates is a tab of this page per the spec — routed to its own
+              placeholder page until the tab content is built. */}
+          <div className="tabs" style={{ marginRight: 4 }}>
+            <Link href="/covenants" className="tab active">Covenant tests</Link>
+            <Link href="/certificates" className="tab">Certificates</Link>
+          </div>
           {defs.length > 0 && can('EDITOR') ? (
             <button className="btn btn-secondary" onClick={() => setTestOpen(true)}><Play size={14} /> Run tests</button>
           ) : null}
