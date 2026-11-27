@@ -23,7 +23,7 @@ const router = Router();
 // whitelisted fields/roles/filters, unavailable datasets with honest reasons,
 // the intent list, the caps, and the flag states.
 router.get(
-  '/:workspaceId/charts/catalog',
+  '/workspaces/:workspaceId/charts/catalog',
   requireAuth,
   requireWorkspace('VIEWER'),
   asyncH(async (_req, res) => {
@@ -36,7 +36,7 @@ router.get(
 // guardrail notes, and cap/truncation info. Unresolved points are included
 // but flagged (TRUST RULE).
 router.post(
-  '/:workspaceId/charts/data',
+  '/workspaces/:workspaceId/charts/data',
   requireAuth,
   requireWorkspace('VIEWER'),
   asyncH(async (req, res) => {
@@ -48,7 +48,7 @@ router.post(
 // ── Saved views ──────────────────────────────────────────────────
 
 router.get(
-  '/:workspaceId/charts/views',
+  '/workspaces/:workspaceId/charts/views',
   requireAuth,
   requireWorkspace('VIEWER'),
   asyncH(async (req, res) => {
@@ -58,7 +58,7 @@ router.get(
 );
 
 router.post(
-  '/:workspaceId/charts/views',
+  '/workspaces/:workspaceId/charts/views',
   requireAuth,
   requireWorkspace('EDITOR'),
   asyncH(async (req, res) => {
@@ -83,7 +83,7 @@ router.post(
 );
 
 router.patch(
-  '/:workspaceId/charts/views/:viewId',
+  '/workspaces/:workspaceId/charts/views/:viewId',
   requireAuth,
   requireWorkspace('EDITOR'),
   asyncH(async (req, res) => {
@@ -110,7 +110,7 @@ router.patch(
 );
 
 router.delete(
-  '/:workspaceId/charts/views/:viewId',
+  '/workspaces/:workspaceId/charts/views/:viewId',
   requireAuth,
   requireWorkspace('EDITOR'),
   asyncH(async (req, res) => {

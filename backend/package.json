@@ -13,6 +13,7 @@
     "start": "node dist/index.js",
     "worker": "node dist/worker.js",
     "seed": "tsx prisma/seed.ts",
+    "seed:charts-demo": "tsx prisma/seed-charts-demo.ts",
     "prisma:generate": "prisma generate",
     "migrate:deploy": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
