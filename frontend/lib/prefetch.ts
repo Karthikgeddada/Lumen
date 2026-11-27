@@ -41,6 +41,11 @@ export function prefetchRoute(href: string, wid?: string): void {
     ];
   } else if (route === '/analytics') {
     targets = [{ key: `ent-${wid}`, fetch: () => api(`/api/${wid}/analytics/entities`) }];
+  } else if (route === '/portfolio') {
+    targets = [
+      { key: `ent-${wid}`, fetch: () => api(`/api/${wid}/analytics/entities`) },
+      { key: `cov-${wid}-all`, fetch: () => api(`${W}/covenants`) },
+    ];
   } else if (route === '/covenants') {
     targets = [
       { key: `ent-${wid}`, fetch: () => api(`/api/${wid}/analytics/entities`) },

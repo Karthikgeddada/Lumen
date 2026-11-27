@@ -8,7 +8,7 @@ import {
   LayoutGrid, Library, MessagesSquare, ClipboardCheck, FileSpreadsheet,
   LineChart, Settings, Search, Bell, ChevronsUpDown, Plus, LogOut,
   Check, FileText, PanelLeftClose, PanelLeftOpen, Scale, Gauge,
-  Briefcase, Building2, Award, FileBarChart,
+  Briefcase,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
@@ -88,14 +88,14 @@ export function Shell({ children }: { children: ReactNode }) {
   const nav = [
     { section: 'Overview', items: [{ href: '/dashboard', label: 'Dashboard', icon: LayoutGrid }] },
     {
+      // Per the page spec: Borrowers is a landing page (opened from Portfolio
+      // or the Data Room, never a sidebar item); Certificates becomes a tab
+      // inside Covenants; Reports stays hidden until it exists.
       section: 'Monitoring',
       items: [
         { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
-        { href: '/borrowers', label: 'Borrowers', icon: Building2 },
         { href: '/covenants', label: 'Covenants', icon: Scale },
-        { href: '/certificates', label: 'Certificates', icon: Award },
         { href: '/analytics', label: 'Analytics', icon: LineChart },
-        { href: '/reports', label: 'Reports', icon: FileBarChart },
       ],
     },
     {
