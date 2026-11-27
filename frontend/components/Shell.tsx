@@ -165,6 +165,9 @@ export function Shell({ children }: { children: ReactNode }) {
           ) : null}
         </div>
 
+        {/* Nav scrolls on its own when items exceed the viewport height;
+            brand, workspace switcher, and footer stay fixed. */}
+        <nav className="sidebar-nav" aria-label="Main navigation">
         {nav.map((group) => (
           <div className="nav-section" key={group.section}>
             <div className="nav-label">{group.section}</div>
@@ -184,6 +187,7 @@ export function Shell({ children }: { children: ReactNode }) {
             })}
           </div>
         ))}
+        </nav>
 
         <div className="sidebar-foot">
           <Link
