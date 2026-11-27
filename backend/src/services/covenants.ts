@@ -4,7 +4,7 @@ import { logger } from '../logger';
 import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
 import { sendCovenantBreachEmail } from './mailer';
-import { evaluateCovenant, isFreshBreach } from './trust';
+import { evaluateCovenant, isFreshBreach } from '../analytics/core/trust';
 import {
   evaluateFormulaCovenant,
   computeNearBreach,
@@ -12,7 +12,7 @@ import {
   CovenantTerms,
   ScheduleStep,
   NearBreachInfo,
-} from '../analytics/ttm';
+} from '../analytics/core/ttm';
 
 // Covenant intelligence: extract covenant definitions from credit agreements
 // (grounded in the actual clauses), then test each quarter's observed metrics

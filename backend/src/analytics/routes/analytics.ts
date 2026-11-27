@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../prisma';
-import { ApiError, asyncH } from '../middleware/error';
-import { requireAuth, requireWorkspace } from '../middleware/auth';
-import { runCovenantTests } from '../services/covenants';
-import { audit } from '../utils';
-import { entityOverview } from '../analytics/overview';
+import { prisma } from '../../prisma';
+import { ApiError, asyncH } from '../../middleware/error';
+import { requireAuth, requireWorkspace } from '../../middleware/auth';
+import { runCovenantTests } from '../../services/covenants';
+import { audit } from '../../utils';
+import { entityOverview } from '../services/overview';
 
 const router = Router();
 

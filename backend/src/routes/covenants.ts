@@ -6,7 +6,7 @@ import { ApiError, asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { audit } from '../utils';
 import { extractCovenantDefinitions, runCovenantTests } from '../services/covenants';
-import { validateFormula } from '../analytics/formula';
+import { validateFormula } from '../analytics/core/formula';
 import { isValidPeriodLabel } from '../services/validation';
 
 const router = Router();

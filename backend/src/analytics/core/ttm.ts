@@ -15,7 +15,7 @@
 
 import { evaluateFormula } from './formula';
 import { comparePeriods, parsePeriod, trailingFourQuarters } from './periods';
-import { scaleUnresolved, scaleFlags } from '../services/trust';
+import { scaleUnresolved, scaleFlags } from './trust';
 
 export type TermKind = 'flow' | 'stock' | 'ratio';
 

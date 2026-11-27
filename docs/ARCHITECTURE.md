@@ -147,3 +147,30 @@ A figure with unresolved unit-scale flags can never silently flow into a covenan
 **AI call hygiene (2026-11-26):** every AI provider HTTP call (chat, chat-stream connect, embeddings) is aborted after `AI_TIMEOUT_MS` (default 60 s) with a clear error; a hung upstream can no longer pin a worker job. Known limit: once an SSE chat stream has started, token reads are not capped.
 
 **Migration naming (adopted 2026-11-26):** every new migration folder uses a full 14-digit UTC timestamp prefix (`YYYYMMDDHHMMSS_name`, e.g. `20261126160000_covenant_result_reason`), SQL-only, additive columns/tables only, safe to auto-apply via `prisma migrate deploy` on Render boot.
+
+## 11. Backend module conventions (analytics layering, 2026-11-27)
+
+The backend is organized into modules. `src/analytics/` is the first fully
+layered module and the template for others (see docs/ANALYTICS_MODULE.md for
+the full map):
+
+- `analytics/core/` — PURE logic: periods, TTM, formula (mathjs), trust rules.
+  No imports of prisma, express, env/config, logger, middleware, utils,
+  services or routes; no upward (`..`) imports. Importable by anyone.
+- `analytics/services/` — Prisma-backed analytics: overview, quality,
+  dashboard analytics parts (later: observations, charts data). Never imports
+  routes. Outsiders reach these through the barrel, never directly.
+- `analytics/routes/` — the module's Express routers (analytics, quality),
+  mounted by `routes/mounts.ts` (the single mount table `index.ts` applies;
+  `routes/routeTable.test.ts` snapshots all 83 `METHOD /api/...` paths).
+- `analytics/index.ts` — the barrel; outsiders (routes/, services/, worker)
+  import analytics only via this barrel or `analytics/core/`.
+
+`src/dependencyRules` enforcement is real, not convention:
+`analytics/dependencyRules.test.ts` statically scans every non-test source
+file and fails CI on any layering violation. Still flat/legacy: `services/`
+(extraction, covenants, validation, scale, rag, ai …) — those import analytics
+only via `analytics/core`, enforced by the same test. When another module
+(e.g. documents, questionnaires) gets layered, copy this pattern:
+core (pure) → services (Prisma) → routes (thin), plus mount table entry and
+dependency-rule tests.

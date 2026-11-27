@@ -1,7 +1,11 @@
-// Public surface of the analytics module. Everything here was moved out of
-// src/services (see docs/DECISIONS.md — move-only restructure, no behavior
-// change; the route-table snapshot test guards the API surface).
-export * from './overview';
-export * from './periods';
-export * from './ttm';
-export * from './formula';
+// Public surface of the analytics module. Outsiders (routes/, services/,
+// worker) import from here or from analytics/core — never from
+// analytics/services or analytics/routes directly (enforced by
+// analytics/dependencyRules.test.ts).
+export * from './core/periods';
+export * from './core/ttm';
+export * from './core/formula';
+export * from './core/trust';
+export * from './services/overview';
+export * from './services/quality';
+export * from './services/dashboard';

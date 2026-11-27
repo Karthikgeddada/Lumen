@@ -13,9 +13,9 @@ import searchRoutes from './search';
 import conversationRoutes from './conversations';
 import extractionRoutes from './extraction';
 import questionnaireRoutes from './questionnaires';
-import analyticsRoutes from './analytics';
+import analyticsRoutes from '../analytics/routes/analytics';
 import covenantRoutes from './covenants';
-import qualityRoutes from './quality';
+import qualityRoutes from '../analytics/routes/quality';
 import dashboardRoutes from './dashboard';
 import notificationRoutes from './notifications';
 

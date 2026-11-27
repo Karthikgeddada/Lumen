@@ -8,8 +8,8 @@ import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { audit } from '../utils';
 import { enqueue } from '../services/queue';
 import { runExtraction, suggestFields } from '../services/extract';
-import { ingestFromExtraction } from '../analytics/overview';
-import { applyScaleResolution, scaleFlags, scaleUnresolved } from '../services/trust';
+import { ingestFromExtraction } from '../analytics';
+import { applyScaleResolution, scaleFlags, scaleUnresolved } from '../analytics/core/trust';
 
 const router = Router();
 
