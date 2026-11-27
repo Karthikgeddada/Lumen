@@ -6,6 +6,7 @@ import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { runCovenantTests } from '../services/covenants';
 import { audit } from '../utils';
 import { entityOverview } from '../services/analytics';
+import { seedPackageItems } from '../services/borrowers';
 
 const router = Router();
 
@@ -31,6 +32,7 @@ router.post(
   asyncH(async (req, res) => {
     const body = z.object({ name: z.string().trim().min(1).max(120) }).parse(req.body);
     const entity = await prisma.entity.create({ data: { workspaceId: req.ws!.id, name: body.name } });
+    await seedPackageItems(entity.id); // default quarterly package for the new borrower
     res.status(201).json({ entity });
   }),
 );

@@ -257,6 +257,9 @@ model Document {
   id           String         @id @default(cuid())
   workspaceId  String
   collectionId String?
+  // Borrower (entity) this document belongs to — drives company pages and
+  // quarterly package checks. Untagged documents stay Data-Room-only.
+  entityId     String?
   name         String
   fileType     String // pdf | docx | xlsx | csv | txt | doc | xls
   mimeType     String
@@ -281,6 +284,7 @@ model Document {
 
   workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   collection Collection?       @relation(fields: [collectionId], references: [id])
+  entity     Entity?           @relation(fields: [entityId], references: [id])
   owner      User              @relation(fields: [ownerId], references: [id])
   sections  DocumentSection[]
   tables    DocumentTable[]
@@ -293,6 +297,7 @@ model Document {
 
   @@index([workspaceId, status])
   @@index([collectionId])
+  @@index([entityId])
   @@index([workspaceId, name])
 }
 
@@ -594,8 +599,29 @@ model Entity {
   observations MetricObservation[]
   reports     Report[]
   covenantDefinitions CovenantDefinition[]
+  packageItems PackageItem[]
+  documents   Document[]
 
   @@unique([workspaceId, name])
+}
+
+// One expected line item in a borrower's quarterly reporting package — e.g.
+// "Financial statements". `keywords` is a comma-separated list of
+// case-insensitive substrings matched against document names to decide
+// whether the item arrived in a given quarter (any document tagged to the
+// borrower whose name matches, with an arrival date inside the quarter).
+model PackageItem {
+  id        String   @id @default(cuid())
+  entityId  String
+  label     String
+  keywords  String
+  required  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([entityId])
 }
 
 // One metric for one period. Derivation distinguishes reported vs calculated
