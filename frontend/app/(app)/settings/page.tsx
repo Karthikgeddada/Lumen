@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import useSWR from 'swr';
+import { Users } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
 import { useWorkspace } from '../../../lib/workspace';
@@ -91,7 +93,7 @@ export default function Settings() {
       <div className="page-head">
         <div>
           <div className="page-title">Settings</div>
-          <div className="page-desc">Your profile, this workspace, and AI review rules.</div>
+          <div className="page-desc">Your profile, this workspace, team, and AI review rules.</div>
         </div>
       </div>
 
@@ -192,6 +194,20 @@ export default function Settings() {
               Only workspace admins can change AI answer rules.
             </div>
           )}
+        </div>
+
+        {/* Workspaces & Team — moved under Settings in the sidebar */}
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Workspaces & Team</div>
+            <span className="card-sub">Members, roles, and invitations</span>
+          </div>
+          <div style={{ padding: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              Invite teammates, change roles, review invitations, and see workspace activity.
+            </div>
+            <Link className="btn btn-secondary" href="/team"><Users size={14} /> Manage team</Link>
+          </div>
         </div>
 
         {/* Figure validation rules (spec C1) */}

@@ -6,8 +6,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import {
   LayoutGrid, Library, MessagesSquare, ClipboardCheck, FileSpreadsheet,
-  LineChart, Users, Settings, Search, Bell, ChevronsUpDown, Plus, LogOut,
+  LineChart, Settings, Search, Bell, ChevronsUpDown, Plus, LogOut,
   Check, FileText, PanelLeftClose, PanelLeftOpen, Scale, Gauge,
+  Briefcase, Building2, Award, FileBarChart,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
@@ -87,18 +88,32 @@ export function Shell({ children }: { children: ReactNode }) {
   const nav = [
     { section: 'Overview', items: [{ href: '/dashboard', label: 'Dashboard', icon: LayoutGrid }] },
     {
-      section: 'Workspace',
+      section: 'Monitoring',
+      items: [
+        { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
+        { href: '/borrowers', label: 'Borrowers', icon: Building2 },
+        { href: '/covenants', label: 'Covenants', icon: Scale },
+        { href: '/certificates', label: 'Certificates', icon: Award },
+        { href: '/analytics', label: 'Analytics', icon: LineChart },
+        { href: '/reports', label: 'Reports', icon: FileBarChart },
+      ],
+    },
+    {
+      section: 'Documents',
       items: [
         { href: '/library', label: 'Data Room', icon: Library },
-        { href: '/assistant', label: 'AI Assistant', icon: MessagesSquare },
-        { href: '/extraction', label: 'Data Extraction', icon: ClipboardCheck },
-        { href: '/questionnaires', label: 'Diligence Questionnaires', icon: FileSpreadsheet },
-        { href: '/analytics', label: 'Portfolio Analytics', icon: LineChart },
-        { href: '/covenants', label: 'Covenants', icon: Scale },
+        { href: '/extraction', label: 'Extraction & Review', icon: ClipboardCheck },
+        { href: '/questionnaires', label: 'Questionnaires', icon: FileSpreadsheet },
+      ],
+    },
+    {
+      section: 'Tools',
+      items: [
+        { href: '/assistant', label: 'Assistant', icon: MessagesSquare },
         { href: '/quality', label: 'Data Quality', icon: Gauge },
       ],
     },
-    { section: 'Manage', items: [{ href: '/team', label: 'Workspaces & Team', icon: Users }, { href: '/settings', label: 'Settings', icon: Settings }] },
+    { section: 'Manage', items: [{ href: '/settings', label: 'Settings', icon: Settings }] },
   ];
 
   async function markAllRead() {
