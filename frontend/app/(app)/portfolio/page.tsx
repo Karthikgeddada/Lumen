@@ -13,7 +13,7 @@ import { api } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
 import { EmptyState, Field, LoadingBlock, Modal } from '../../../components/ui';
 
-interface Entity { id: string; name: string; _count: { observations: number; reports: number } }
+interface Entity { id: string; name: string; parentId?: string | null; _count: { observations: number; reports: number } }
 interface CovenantResult {
   id: string; period: string; value: number | null;
   status: 'PASS' | 'FAIL' | 'NOT_TESTED' | 'WAIVED';
@@ -227,6 +227,9 @@ export default function Portfolio() {
                     </Link>
                     {cov.near ? (
                       <span className="badge" style={{ marginLeft: 10, background: 'rgba(154, 103, 0, 0.12)', color: '#9a6700' }}>Near breach</span>
+                    ) : null}
+                    {e.parentId ? (
+                      <span className="badge badge-blue" style={{ marginLeft: 10 }}>Subsidiary</span>
                     ) : null}
                   </td>
                   <td style={{ fontSize: 12.5, color: e._count.observations === 0 ? 'var(--text-muted)' : 'var(--text-secondary)' }}>

@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import useSWR from 'swr';
-import { Building2, Plus, ArrowLeft, Tag, Unlink, Activity, FileText } from 'lucide-react';
+import { Building2, Plus, ArrowLeft, Tag, Unlink, Activity, FileText, Network } from 'lucide-react';
 import { api } from '../../../../lib/api';
 import { useWorkspace } from '../../../../lib/workspace';
 import { DerivationBadge, DocStatusBadge, EmptyState, ErrorBanner, Field, LoadingBlock, Modal } from '../../../../components/ui';
@@ -30,6 +30,8 @@ interface BorrowerData {
     metrics: { metricKey: string; label: string; unit: string; points: { period: string; value: number; derivation: string }[]; deltaPct: number | null; deltaNote: string | null }[];
   } | null;
   documents: { id: string; name: string; fileType: string; status: string; source: string; uploadedAt: string; pageCount: number | null }[];
+  subsidiaries: { id: string; name: string; _count: { observations: number; covenantDefinitions: number } }[];
+  parent: { id: string; name: string } | null;
 }
 interface WsDoc { id: string; name: string; status: string }
 
@@ -45,6 +47,8 @@ export default function BorrowerPage() {
   const [itemOpen, setItemOpen] = useState(false);
   const [label, setLabel] = useState('');
   const [keywords, setKeywords] = useState('');
+  const [subOpen, setSubOpen] = useState(false);
+  const [subName, setSubName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,8 +85,13 @@ export default function BorrowerPage() {
           <Link href="/portfolio" className="btn btn-ghost btn-sm" style={{ marginBottom: 8, padding: '0 4px' }}>
             <ArrowLeft size={13} /> Portfolio
           </Link>
-          <div className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <Building2 size={20} color="var(--text-muted)" /> {data?.entity.name ?? 'Borrower'}
+            {data?.parent ? (
+              <Link href={`/borrowers/${data.parent.id}`} className="badge badge-blue" style={{ textDecoration: 'none', fontSize: 11.5 }} title="This borrower is a subsidiary — open its parent">
+                <Network size={11} style={{ verticalAlign: -1 }} /> Subsidiary of {data.parent.name}
+              </Link>
+            ) : null}
           </div>
           <div className="page-desc">Quarterly monitoring — package, covenants, trend, and documents.</div>
         </div>
@@ -249,6 +258,47 @@ export default function BorrowerPage() {
               </table>
             )}
           </div>
+
+          {/* Subsidiaries — group structure under this borrower */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title"><Network size={13} style={{ verticalAlign: -2, marginRight: 6 }} />Subsidiaries</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="card-sub">tracked under this borrower</span>
+                {editable ? (
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setSubName(''); setSubOpen(true); }}><Plus size={13} /> Add subsidiary</button>
+                ) : null}
+              </div>
+            </div>
+            {data.subsidiaries.length === 0 ? (
+              <div style={{ padding: 20 }}><EmptyState
+                icon={<Network size={20} />}
+                title="No subsidiaries tracked"
+                sub="Add the entities that sit under this borrower — each gets its own metrics, covenants, and quarterly package."
+              /></div>
+            ) : (
+              <table className="table">
+                <thead><tr><th>Subsidiary</th><th>Metric data</th><th>Covenants</th></tr></thead>
+                <tbody>
+                  {data.subsidiaries.map((s) => (
+                    <tr key={s.id}>
+                      <td className="strong">
+                        <Link href={`/borrowers/${s.id}`} style={{ color: 'var(--text-primary)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          <Building2 size={13} color="var(--text-muted)" /> {s.name}
+                        </Link>
+                      </td>
+                      <td style={{ fontSize: 12.5, color: s._count.observations === 0 ? 'var(--text-muted)' : 'var(--text-secondary)' }}>
+                        {s._count.observations === 0 ? 'No data yet' : `${s._count.observations} observation${s._count.observations === 1 ? '' : 's'}`}
+                      </td>
+                      <td style={{ fontSize: 12.5, color: s._count.covenantDefinitions === 0 ? 'var(--text-muted)' : 'var(--text-secondary)' }}>
+                        {s._count.covenantDefinitions === 0 ? '—' : s._count.covenantDefinitions}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </>
       )}
 
@@ -289,6 +339,22 @@ export default function BorrowerPage() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <button type="button" className="btn btn-secondary" onClick={() => setItemOpen(false)}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={busy}>Add item</button>
+          </div>
+        </form>
+      </Modal>
+      {/* Add subsidiary */}
+      <Modal open={subOpen} onClose={() => setSubOpen(false)} title={`Add a subsidiary under ${data?.entity.name ?? 'this borrower'}`}>
+        <form onSubmit={(e) => { e.preventDefault(); run(async () => {
+          await api(`/api/${wid}/analytics/entities`, { method: 'POST', body: { name: subName, parentId: entityId } });
+          setSubOpen(false);
+        }); }} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Field label="Subsidiary name" hint="It becomes its own tracked borrower — with the default quarterly package — and shows on this page as a subsidiary.">
+            <input className="input" required autoFocus maxLength={120} value={subName} placeholder="e.g. Northwind Foods Holding GmbH"
+              onChange={(e) => setSubName(e.target.value)} />
+          </Field>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setSubOpen(false)}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={busy || !subName.trim()}>Add subsidiary</button>
           </div>
         </form>
       </Modal>

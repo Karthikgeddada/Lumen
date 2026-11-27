@@ -30,8 +30,20 @@ router.post(
   requireAuth,
   requireWorkspace('EDITOR'),
   asyncH(async (req, res) => {
-    const body = z.object({ name: z.string().trim().min(1).max(120) }).parse(req.body);
-    const entity = await prisma.entity.create({ data: { workspaceId: req.ws!.id, name: body.name } });
+    const body = z
+      .object({
+        name: z.string().trim().min(1).max(120),
+        // Optional parent — set when creating a subsidiary of an existing borrower.
+        parentId: z.string().trim().optional(),
+      })
+      .parse(req.body);
+    if (body.parentId) {
+      const parent = await prisma.entity.findFirst({ where: { id: body.parentId, workspaceId: req.ws!.id } });
+      if (!parent) throw new ApiError(404, 'NOT_FOUND', 'Parent company not found.');
+    }
+    const entity = await prisma.entity.create({
+      data: { workspaceId: req.ws!.id, name: body.name, parentId: body.parentId ?? null },
+    });
     await seedPackageItems(entity.id); // default quarterly package for the new borrower
     res.status(201).json({ entity });
   }),

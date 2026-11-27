@@ -593,9 +593,14 @@ model Entity {
   id          String   @id @default(cuid())
   workspaceId String
   name        String
+  // Group structure: a subsidiary points at its parent borrower. Portfolio
+  // rolls up parents; company pages list children.
+  parentId    String?
   createdAt   DateTime @default(now())
 
   workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent      Entity?            @relation("EntityStructure", fields: [parentId], references: [id], onDelete: SetNull)
+  subsidiaries Entity[]          @relation("EntityStructure")
   observations MetricObservation[]
   reports     Report[]
   covenantDefinitions CovenantDefinition[]
@@ -603,6 +608,7 @@ model Entity {
   documents   Document[]
 
   @@unique([workspaceId, name])
+  @@index([parentId])
 }
 
 // One expected line item in a borrower's quarterly reporting package — e.g.

@@ -37,7 +37,7 @@ router.get(
     const entity = await entityInWorkspace(req.params.entityId, req.ws!.id);
     await seedPackageItems(entity.id); // lazy default backfill, like inboundEmail
 
-    const [defs, docs, overview] = await Promise.all([
+    const [defs, docs, overview, subsidiaries, parent] = await Promise.all([
       prisma.covenantDefinition.findMany({
         where: { entityId: entity.id, deletedAt: null },
         include: { results: { orderBy: { computedAt: 'desc' } } },
@@ -49,6 +49,14 @@ router.get(
         select: { id: true, name: true, fileType: true, status: true, source: true, uploadedAt: true, pageCount: true },
       }),
       entityOverview(entity.id, 4),
+      prisma.entity.findMany({
+        where: { parentId: entity.id, workspaceId: req.ws!.id },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, _count: { select: { observations: true, covenantDefinitions: true } } },
+      }),
+      entity.parentId
+        ? prisma.entity.findUnique({ where: { id: entity.parentId }, select: { id: true, name: true } })
+        : Promise.resolve(null),
     ]);
 
     const latestResults = defs.map((d) => d.results[0]).filter(Boolean);
@@ -70,6 +78,8 @@ router.get(
       covenants,
       trend: overview, // { entity, metrics, segments, dataNotice }
       documents: docs,
+      subsidiaries,
+      parent,
     });
   }),
 );
