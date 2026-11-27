@@ -54,6 +54,17 @@ export const config = {
     secretKey: process.env.STORAGE_SECRET_KEY || '',
   },
 
+  inboundEmail: {
+    // Domain whose MX points at your inbound-email provider (SendGrid Inbound
+    // Parse, Postmark inbound, Mailgun routes, Cloudflare Email Workers…).
+    // Workspace addresses look like `acme-corp.k3f9@in.lumen.app`.
+    domain: process.env.INBOUND_EMAIL_DOMAIN || 'in.lumen.app',
+    // Shared secret the provider echoes back (`x-webhook-secret` header or
+    // `?secret=` query param). Leave empty only in local development —
+    // production deployments must set INBOUND_EMAIL_WEBHOOK_SECRET.
+    secret: process.env.INBOUND_EMAIL_WEBHOOK_SECRET || '',
+  },
+
   parse: {
     // Python parser wiring (read directly by services/pipelineClient.ts):
     // PDF/DOCX/XLSX/CSV parse in-process by default — the worker spawns

@@ -159,6 +159,9 @@ model Workspace {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  // Dedicated inbound address — email attachments sent here are ingested into
+  // this workspace's Data Room "Email Inbox" folder by the inbound-email webhook.
+  inboundEmail String? @unique
   industry  String   @default("Business")
   plan      String   @default("trial") // trial ends 14 days after createdAt
   storageUsedBytes BigInt @default(0)
@@ -265,6 +268,12 @@ model Document {
   ownerId      String
   isDemo       Boolean        @default(false)
   tablesUnavailable Boolean   @default(false) // PDF fell back to pdf-parse (sidecar unreachable) — tables/bboxes missing, disclosed in UI
+  // Provenance: UPLOAD (user upload) or EMAIL (arrived via the inbound-email
+  // webhook); EMAIL rows carry the sender/subject/received time for triage.
+  source       String         @default("UPLOAD") // UPLOAD | EMAIL
+  emailFrom    String?
+  emailSubject String?
+  emailReceivedAt DateTime?
   uploadedAt   DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   processedAt  DateTime?

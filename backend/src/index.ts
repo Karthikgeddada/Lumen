@@ -18,6 +18,7 @@ import dashboardRoutes from './routes/dashboard';
 import notificationRoutes from './routes/notifications';
 import covenantRoutes from './routes/covenants';
 import qualityRoutes from './routes/quality';
+import inboundEmailRoutes from './routes/inboundEmail';
 
 const app = express();
 
@@ -72,6 +73,9 @@ app.use('/api', generalLimiter, covenantRoutes);
 app.use('/api', generalLimiter, qualityRoutes);
 app.use('/api', generalLimiter, dashboardRoutes);
 app.use('/api/notifications', generalLimiter, notificationRoutes);
+// Inbound email webhook — unauthenticated (called by the email provider),
+// protected by the shared INBOUND_EMAIL_WEBHOOK_SECRET instead.
+app.use('/api/inbound-email', generalLimiter, inboundEmailRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

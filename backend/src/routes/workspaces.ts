@@ -10,6 +10,12 @@ import { sendInvitation } from '../services/mailer';
 
 const router = Router();
 
+// Dedicated inbound address for a workspace (slug + short random suffix so a
+// deleted workspace's address cannot be guessed or collide).
+function inboundAddressFor(slug: string): string {
+  return `${slug}.${randomToken(2).toLowerCase()}@${config.inboundEmail.domain}`;
+}
+
 // Workspaces, membership, roles, invitations, settings and activity — all
 // permission-enforced on the backend. Role gates:
 //   VIEWER read · REVIEWER review answers/extractions · EDITOR content
@@ -26,13 +32,24 @@ router.get(
         role: true,
         workspace: {
           select: {
-            id: true, name: true, slug: true, industry: true, plan: true,
+            id: true, name: true, slug: true, inboundEmail: true, industry: true, plan: true,
             createdAt: true, storageUsedBytes: true,
             _count: { select: { memberships: { where: { deletedAt: null } }, documents: { where: { deletedAt: null } } } },
           },
         },
       },
     });
+    // Lazily backfill inbound addresses for pre-existing workspaces.
+    const missing = rows.filter((r) => !r.workspace.inboundEmail);
+    if (missing.length) {
+      await Promise.all(missing.map(async (r) => {
+        const inboundEmail = inboundAddressFor(r.workspace.slug);
+        try {
+          await prisma.workspace.update({ where: { id: r.workspace.id }, data: { inboundEmail } });
+          (r.workspace as { inboundEmail: string | null }).inboundEmail = inboundEmail;
+        } catch { /* address collision — leave for the next request */ }
+      }));
+    }
     res.json({ workspaces: rows.map((r) => ({ ...r.workspace, role: r.role })) });
   }),
 );
@@ -54,6 +71,7 @@ router.post(
       data: {
         name: body.name,
         slug,
+        inboundEmail: inboundAddressFor(slug),
         industry: body.industry ?? 'Business',
         createdById: req.auth!.userId,
         memberships: { create: { userId: req.auth!.userId, role: 'OWNER' } },
@@ -77,10 +95,10 @@ router.get(
   requireAuth,
   requireWorkspace('VIEWER'),
   asyncH(async (req, res) => {
-    const ws = await prisma.workspace.findUnique({
+    let ws = await prisma.workspace.findUnique({
       where: { id: req.ws!.id },
       select: {
-        id: true, name: true, slug: true, industry: true, plan: true, createdAt: true,
+        id: true, name: true, slug: true, inboundEmail: true, industry: true, plan: true, createdAt: true,
         storageUsedBytes: true,
         _count: {
           select: {
@@ -91,6 +109,13 @@ router.get(
         },
       },
     });
+    if (ws && !ws.inboundEmail) {
+      const inboundEmail = inboundAddressFor(ws.slug);
+      try {
+        await prisma.workspace.update({ where: { id: ws.id }, data: { inboundEmail } });
+        ws = { ...ws, inboundEmail };
+      } catch { /* leave null — retried on the next request */ }
+    }
     res.json({ workspace: { ...ws, role: req.ws!.role } });
   }),
 );

@@ -123,6 +123,7 @@ router.get(
         select: {
           id: true, name: true, fileType: true, sizeBytes: true, pageCount: true,
           status: true, error: true, isDemo: true, uploadedAt: true, updatedAt: true, processedAt: true,
+          source: true, emailFrom: true, emailSubject: true,
           collection: { select: { id: true, name: true } },
           owner: { select: { id: true, firstName: true, lastName: true } },
         },

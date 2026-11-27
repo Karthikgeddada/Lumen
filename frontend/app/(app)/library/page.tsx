@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
-import { Upload, FileText, Plus, X, FolderOpen, ChevronDown, Trash2, RotateCcw } from 'lucide-react';
+import { Upload, FileText, Plus, X, FolderOpen, ChevronDown, Trash2, RotateCcw, Mail, Copy, Check } from 'lucide-react';
 import { api, qs } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
 import {
@@ -15,6 +15,7 @@ import {
 interface Doc {
   id: string; name: string; fileType: string; sizeBytes: number; pageCount: number | null;
   status: string; error: string | null; isDemo: boolean; uploadedAt: string;
+  source: string; emailFrom: string | null; emailSubject: string | null;
   collection: { id: string; name: string } | null;
   owner: { firstName: string; lastName: string } | null;
 }
@@ -80,6 +81,13 @@ export default function Library() {
     wid ? `/api/workspaces/${wid}/collections` : null,
     (k: string) => api<{ collections: Collection[] }>(k),
   );
+  // Workspace detail — carries the dedicated inbound email address.
+  const { data: wsData } = useSWR(
+    wid ? `/api/workspaces/${wid}` : null,
+    (k: string) => api<{ workspace: { name: string; inboundEmail: string | null } }>(k),
+  );
+  const inboundEmail = wsData?.workspace.inboundEmail ?? null;
+  const [copied, setCopied] = useState(false);
 
   return (
     <main className="content">
@@ -97,6 +105,34 @@ export default function Library() {
       </div>
 
       <ErrorBanner message={error ? 'Could not load documents.' : null} />
+
+      {/* Email-in banner — attachments sent to this address land in the Email Inbox folder */}
+      {inboundEmail ? (
+        <div className="card" style={{ padding: '12px 14px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Mail size={16} color="var(--accent)" style={{ flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600 }}>Email documents straight into this data room</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+              Send files as attachments to{' '}
+              <span className="mono" style={{ userSelect: 'all' }}>{inboundEmail}</span>{' '}
+              — they arrive in the “Email Inbox” folder, ready to file into company folders.
+            </div>
+          </div>
+          <button
+            className="btn btn-secondary btn-sm"
+            style={{ marginLeft: 'auto' }}
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(inboundEmail);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch { /* clipboard unavailable */ }
+            }}
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy address'}
+          </button>
+        </div>
+      ) : null}
 
       {/* Filters */}
       <div className="card" style={{ padding: '10px 12px', marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -188,6 +224,14 @@ export default function Library() {
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 340, display: 'inline-block' }}>{doc.name}</span>
                     </Link>
                     {doc.isDemo ? <span style={{ marginLeft: 7 }}><DemoTag /></span> : null}
+                    {doc.source === 'EMAIL' ? (
+                      <span
+                        title={`${doc.emailFrom ? `From ${doc.emailFrom} · ` : ''}${doc.emailSubject ?? 'Received via email'}`}
+                        style={{ marginLeft: 7, fontSize: 11, padding: '2px 8px', borderRadius: 999, background: 'var(--sunken)', color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}
+                      >
+                        <Mail size={10} /> Email
+                      </span>
+                    ) : null}
                   </td>
                   <td>
                     {can('EDITOR') && !doc.isDemo ? (
