@@ -12,6 +12,7 @@ import {
   DocStatusBadge, DemoTag, EmptyState, LoadingBlock, Avatar,
   formatDate, timeAgo, formatBytes,
 } from '../../../components/ui';
+import EChart, { CHART, type EChartOption } from '../../../components/EChart';
 
 interface CovenantBoardItem {
   id: string; label: string; entityName: string;
@@ -53,6 +54,67 @@ const ACTION_LABELS: Record<string, string> = {
   'extraction.verified': 'verified an extraction',
   'answer.approved': 'approved an answer',
 };
+
+// Covenant status at a glance: a donut over ALL covenants (the list below
+// shows only the first six). Colors match the app's status semantics —
+// green pass, red breach, gray untested — so the shape is readable before
+// any label.
+function CovenantDonut({ covenants }: { covenants: CovenantBoardItem[] }) {
+  const counts: Record<string, number> = { PASS: 0, FAIL: 0, NOT_TESTED: 0, WAIVED: 0 };
+  for (const c of covenants) if (c.latest?.status) counts[c.latest.status] += 1;
+  const total = covenants.length;
+
+  const option: EChartOption = {
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: CHART.surface,
+      borderColor: CHART.hairline,
+      textStyle: { color: '#1d1d1f', fontSize: 12 },
+      formatter: (p: unknown) => {
+        const { name, value, percent } = p as { name: string; value: number; percent: number };
+        return `<b>${name}</b>: ${value} of ${total} (${percent}%)`;
+      },
+    },
+    series: [{
+      type: 'pie',
+      radius: ['62%', '88%'],
+      center: ['50%', '50%'],
+      avoidLabelOverlap: false,
+      label: { show: false },
+      labelLine: { show: false },
+      data: [
+        { name: 'Pass', value: counts.PASS, itemStyle: { color: CHART.success } },
+        { name: 'Breach', value: counts.FAIL, itemStyle: { color: CHART.error } },
+        { name: 'Not tested', value: counts.NOT_TESTED, itemStyle: { color: CHART.textMuted } },
+        { name: 'Waived', value: counts.WAIVED, itemStyle: { color: CHART.blueLight } },
+      ].filter((d) => d.value > 0),
+    }],
+  };
+
+  const legend = [
+    { label: 'Pass', n: counts.PASS, color: CHART.success },
+    { label: 'Breach', n: counts.FAIL, color: CHART.error },
+    { label: 'Not tested', n: counts.NOT_TESTED, color: CHART.textMuted },
+    { label: 'Waived', n: counts.WAIVED, color: CHART.blueLight },
+  ].filter((l) => l.n > 0);
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '8px 16px 10px 20px', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ width: 118, flexShrink: 0 }}>
+        <EChart option={option} height={112} />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{total} covenants tracked</span>
+        {legend.map((l) => (
+          <span key={l.label} style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color, flexShrink: 0 }} />
+            {l.label} <b className="mono">{l.n}</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { workspace } = useWorkspace();
@@ -116,6 +178,7 @@ export default function Dashboard() {
                     <div className="card-title">Covenant status</div>
                     <Link href="/covenants" className="btn btn-ghost btn-sm">All covenants <ArrowRight size={13} /></Link>
                   </div>
+                  <CovenantDonut covenants={d.covenants} />
                   {d.covenants.slice(0, 6).map((c) => (
                     <Link key={c.id} href="/covenants" style={{
                       display: 'flex', alignItems: 'center', gap: 12, padding: '11px 20px',

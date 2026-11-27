@@ -6,6 +6,7 @@ import { LineChart, Building2, Plus, Trash2, CalendarClock } from 'lucide-react'
 import { api } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
 import { DerivationBadge, EmptyState, Field, LoadingBlock, Modal, timeAgo } from '../../../components/ui';
+import EChart, { baseAxis, CHART, type EChartOption } from '../../../components/EChart';
 
 interface Entity { id: string; name: string; _count: { observations: number; reports: number } }
 interface Report { id: string; title: string; type: string; schedule: string | null; createdAt: string; lastRunAt: string | null }
@@ -18,6 +19,8 @@ interface Overview {
   }[];
   quarters: string[];
 }
+
+const SERIES_COLORS = ['#0071e3', '#0e9c8a', '#8b5cf6', '#d97706', '#e05780', '#5a6acf', '#64748b'];
 
 export default function Analytics() {
   const { workspace, can } = useWorkspace();
@@ -78,17 +81,23 @@ export default function Analytics() {
       ) : isLoading || !overview ? (
         <LoadingBlock label="Loading metrics…" />
       ) : (
-        <div className="grid-2">
-          {overview.overview.metrics.map((m) => (
-            <MetricCard key={m.key} metric={m} quarters={overview.overview.quarters} />
-          ))}
-          {overview.overview.metrics.length === 0 ? (
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
-              <EmptyState icon={<LineChart size={20} />} title="No observations yet"
-                sub="Add reported figures or run an extraction and send its verified values to analytics." />
-            </div>
-          ) : null}
-        </div>
+        <>
+          {/* Trend overview first — the one chart that compares every metric
+              on a shared (indexed) scale, so the user reads trajectories, not
+              raw incommensurable units. */}
+          <TrendOverview metrics={overview.overview.metrics} />
+          <div className="grid-2">
+            {overview.overview.metrics.map((m) => (
+              <MetricCard key={m.key} metric={m} quarters={overview.overview.quarters} />
+            ))}
+            {overview.overview.metrics.length === 0 ? (
+              <div className="card" style={{ gridColumn: '1 / -1' }}>
+                <EmptyState icon={<LineChart size={20} />} title="No observations yet"
+                  sub="Add reported figures or run an extraction and send its verified values to analytics." />
+              </div>
+            ) : null}
+          </div>
+        </>
       )}
 
       {/* Reports */}
@@ -133,14 +142,128 @@ export default function Analytics() {
   );
 }
 
+// Compact number for axis labels: 1234567 -> "1.2M".
+function compact(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+  if (a >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  if (a >= 1e3) return `${(v / 1e3).toFixed(a >= 1e5 ? 0 : 1)}K`;
+  return String(v);
+}
+
+// All-metric trend comparison: each metric is indexed to its first quarter
+// (= 100), which puts wildly different units (USD millions, ratios, %) on
+// one honest scale. Tooltips still show the real values. Data-zoom lets the
+// user focus a range; the legend toggles metrics.
+function TrendOverview({ metrics }: { metrics: Overview['metrics'] }) {
+  const withData = metrics.filter((m) => m.series.length >= 2);
+  if (withData.length < 2) return null;
+  const byLabel = new Map(withData.map((m) => [m.label, m]));
+
+  const option: EChartOption = {
+    grid: { left: 10, right: 14, top: 8, bottom: 44, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: CHART.surface,
+      borderColor: CHART.hairline,
+      textStyle: { color: '#1d1d1f', fontSize: 12 },
+      formatter: (params: unknown) => {
+        const arr = Array.isArray(params) ? params : [params];
+        const rows = (arr as { seriesName: string; dataIndex: number; marker: string }[])
+          .map((p) => {
+            const m = byLabel.get(p.seriesName);
+            const s = m?.series[p.dataIndex];
+            if (!m || !s) return '';
+            return `${p.marker} ${m.label}: <b>${s.value}</b> ${m.unit}${s.derivation === 'AI_INFERRED' ? ' <span style="color:' + CHART.textMuted + '">(AI-inferred)</span>' : ''}`;
+          })
+          .filter(Boolean);
+        const period = withData[0].series[(arr as { dataIndex: number }[])[0]?.dataIndex]?.period;
+        return period ? `<b>${period}</b><br/>${rows.join('<br/>')}` : '';
+      },
+    },
+    legend: { top: 0, textStyle: { color: CHART.textMuted, fontSize: 11 }, type: 'scroll' },
+    xAxis: { type: 'category', data: withData[0].series.map((s) => s.period), ...baseAxis(), splitLine: { show: false } },
+    yAxis: { type: 'value', ...baseAxis(), name: 'Indexed (first qtr = 100)', nameTextStyle: { color: CHART.textMuted, fontSize: 10.5 } },
+    dataZoom: [
+      { type: 'inside' },
+      { type: 'slider', height: 14, bottom: 6, borderColor: CHART.hairline, fillerColor: CHART.blueTint, handleStyle: { color: CHART.blue } },
+    ],
+    series: withData.map((m, i) => {
+      const base = m.series[0].value;
+      const data = m.series.map((s) => (base !== 0 ? +((s.value / base) * 100).toFixed(1) : null));
+      return {
+        name: m.label,
+        type: 'line' as const,
+        data,
+        symbolSize: 6,
+        lineStyle: { width: 2 },
+        itemStyle: { color: SERIES_COLORS[i % SERIES_COLORS.length] },
+        emphasis: { focus: 'series' as const },
+      };
+    }),
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card-header">
+        <div>
+          <div className="card-title">Trend overview</div>
+          <div className="card-sub">every metric indexed to its first quarter (100) — compare trajectories across units; hover for real values</div>
+        </div>
+      </div>
+      <div style={{ padding: '4px 12px 8px' }}>
+        <EChart option={option} height={280} />
+      </div>
+    </div>
+  );
+}
+
 function MetricCard({ metric, quarters }: { metric: Overview['metrics'][number]; quarters: string[] }) {
   const series = metric.series;
-  const max = Math.max(...series.map((s) => Math.abs(s.value)), 0.0001);
-  const min = Math.min(...series.map((s) => s.value), 0);
-  const range = max - min || 1;
   const latest = series[series.length - 1];
   const prev = series[series.length - 2];
   const delta = latest && prev && prev.value !== 0 ? ((latest.value - prev.value) / Math.abs(prev.value)) * 100 : null;
+
+  const option: EChartOption = {
+    grid: { left: 8, right: 8, top: 10, bottom: 4, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: CHART.surface,
+      borderColor: CHART.hairline,
+      textStyle: { color: '#1d1d1f', fontSize: 12 },
+      formatter: (params: unknown) => {
+        const p = Array.isArray(params) ? params[0] : params;
+        const s = series[(p as { dataIndex: number }).dataIndex];
+        if (!s) return '';
+        const src = s.sourcePage != null ? ` · p.${s.sourcePage}` : '';
+        const d = s.derivation === 'AI_INFERRED' ? 'AI-inferred' : s.derivation === 'CALCULATED' ? 'calculated' : 'reported';
+        return `<b>${s.period}</b><br/>${s.value} ${metric.unit}<br/><span style="color:${CHART.textMuted}">${d}${src}</span>`;
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: series.map((s) => s.period),
+      ...baseAxis(),
+      splitLine: { show: false },
+      axisLabel: { ...baseAxis().axisLabel, rotate: series.length > 6 ? 40 : 0, interval: 0 },
+    },
+    yAxis: { type: 'value', ...baseAxis(), axisLabel: { ...baseAxis().axisLabel, formatter: compact } },
+    series: [{
+      type: 'bar',
+      barMaxWidth: 34,
+      data: series.map((s, i) => ({
+        value: s.value,
+        itemStyle: {
+          color: i === series.length - 1 ? CHART.blue : CHART.blueLight,
+          // Honesty first: AI-inferred figures render faded — you can see
+          // provenance in the chart itself, not just the badge below.
+          opacity: s.derivation === 'AI_INFERRED' ? 0.55 : 1,
+          borderRadius: [4, 4, 2, 2],
+        },
+      })),
+    }],
+  };
 
   return (
     <div className="card">
@@ -156,21 +279,7 @@ function MetricCard({ metric, quarters }: { metric: Overview['metrics'][number];
         ) : null}
       </div>
       <div style={{ padding: '16px 20px 18px' }}>
-        {/* Minimal bar chart, CSS only */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 110 }}>
-          {series.map((s) => (
-            <div key={s.period} style={{ flex: 1, textAlign: 'center' }} title={`${s.period}: ${s.value} ${metric.unit} (${s.derivation})`}>
-              <div style={{
-                height: `${Math.max(((s.value - min) / range) * 90, 6)}px`,
-                background: s === latest ? 'var(--blue)' : 'var(--blue-light)',
-                borderRadius: '4px 4px 2px 2px',
-                opacity: s.derivation === 'AI_INFERRED' ? 0.55 : 1,
-                transition: 'height 0.3s var(--ease)',
-              }} />
-              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6, whiteSpace: 'nowrap' }}>{s.period}</div>
-            </div>
-          ))}
-        </div>
+        <EChart option={option} height={140} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
           {latest ? (
             <>

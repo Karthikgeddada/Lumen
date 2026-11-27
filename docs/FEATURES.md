@@ -243,6 +243,18 @@ Integrated from `phase/accuracy-evidence`, reconciled with the single-service pa
 
 **Status: LIVE** (part of main since the 2026-11-27 integration merge).
 
+### Interactive charts — Apache ECharts (2026-11-27)
+
+All charts run on Apache ECharts (Apache-2.0, free-OSS ✓), tree-shaken to the chart types we actually use (line/bar/pie + grid/tooltip/legend/dataZoom/markLine, canvas renderer) behind one wrapper (`components/EChart.tsx`): browser-only init, auto-resize with its container, disposed on unmount. Palette mirrors `globals.css` so charts sit natively in the UI.
+
+- **Analytics — trend overview**: every metric indexed to its first quarter (= 100) on one shared scale, so wildly different units (USD millions, ratios, %) compare honestly as trajectories; legend toggles, inside + slider data zoom, hover shows the REAL values (with unit and an honest "(AI-inferred)" marker).
+- **Analytics — metric cards**: the CSS bars are now real interactive bar charts — hover for period/value/unit, derivation (reported / calculated / AI-inferred) and the source page; the latest quarter is emphasized; AI-inferred bars render faded (55% opacity) so provenance is visible in the chart itself, not just a badge.
+- **Dashboard — covenant donut**: the covenant status board opens with a donut over ALL covenants (the list shows six) — pass/breach/not-tested/waived in the app's status colors, with counts beside it; honest shape-first reading before any label.
+
+**Verified by:** frontend `tsc --noEmit` clean + full `next build` green (analytics/dashboard routes ~320 kB first-load including ECharts); SSR-safe by construction (charts init in an effect, never during prerender).
+
+**Status: LIVE.**
+
 ---
 
 ## Pipeline technology (open-source per task)
@@ -256,6 +268,7 @@ Integrated from `phase/accuracy-evidence`, reconciled with the single-service pa
 | Word parsing | mammoth | BSD-2 | DOCX → semantic HTML |
 | Excel/CSV parsing | SheetJS (xlsx) | Apache-2.0 | Sheets → tables + rows |
 | Chunking | custom (services/chunker.ts) | in-repo | Heading-path + page aware, source-linked |
+| Charts | Apache ECharts (tree-shaken) | Apache-2.0 | Interactive financial dashboards: zoom, tooltips, indexed multi-metric trends, honest provenance styling |
 | Embeddings | @huggingface/transformers, Xenova/all-MiniLM-L6-v2 (ONNX) | Apache-2.0 | **Runs locally in-process — free and private; no data leaves the server** |
 | Job queue | Postgres `FOR UPDATE SKIP LOCKED` | — | No Redis needed; retries built in |
 | Auth | bcryptjs + jsonwebtoken | MIT | Sessions, refresh tokens, revocation |
