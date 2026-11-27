@@ -6,6 +6,7 @@ export * from './core/periods';
 export * from './core/ttm';
 export * from './core/formula';
 export * from './core/trust';
+export * from './core/units';
 export * from './services/overview';
 export * from './services/quality';
 export * from './services/dashboard';

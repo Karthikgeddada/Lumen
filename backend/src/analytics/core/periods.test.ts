@@ -90,3 +90,50 @@ describe('quarter arithmetic', () => {
     expect(isNextQuarter('2025', 'Q1 2026')).toBe(false);
   });
 });
+
+// ── Granularity (chart-engine item 2) ──────────────────────────────
+import { periodGranularity, splitByGranularity, quarterSequenceWithGaps } from './periods';
+
+describe('period granularity', () => {
+  it('detects quarter vs annual', () => {
+    expect(periodGranularity('Q3 2026')).toBe('quarter');
+    expect(periodGranularity('2026')).toBe('annual');
+    expect(periodGranularity('Q 2026')).toBeNull();
+    expect(periodGranularity('FY2026')).toBeNull();
+  });
+
+  it('splits series so quarterly and annual never share an axis', () => {
+    const { quarterly, annual, unparseable } = splitByGranularity([
+      'Q3 2026', '2026', 'Q1 2026', 'Q4 2025', '2025', 'Q3 2026', 'garbage',
+    ]);
+    expect(quarterly).toEqual(['Q4 2025', 'Q1 2026', 'Q3 2026']); // ordinal order, deduped
+    expect(annual).toEqual(['2025', '2026']);
+    expect(unparseable).toEqual(['garbage']);
+  });
+
+  it('never string-sorts: ordinals only', () => {
+    // string sort would give Q1 2026 < Q4 2025 lexically? No — 'Q1 2026' > 'Q4 2025' is TRUE
+    // lexically ('1' < '4' compares year second), the trap is Q10-style keys which
+    // can't occur; ordinals are still the only sanctioned ordering.
+    expect(splitByGranularity(['Q2 2026', 'Q4 2025', 'Q1 2026']).quarterly).toEqual([
+      'Q4 2025', 'Q1 2026', 'Q2 2026',
+    ]);
+  });
+
+  it('quarter sequence keeps gaps as gaps', () => {
+    // Q4 2025 … Q3 2026 with Q1+Q2 2026 missing → null holes stay visible
+    expect(quarterSequenceWithGaps(['Q3 2026', 'Q4 2025'])).toEqual([
+      'Q4 2025', null, null, 'Q3 2026',
+    ]);
+    // annual periods are ignored (separate axis), single quarter → itself
+    expect(quarterSequenceWithGaps(['2026', 'Q3 2026'])).toEqual(['Q3 2026']);
+    expect(quarterSequenceWithGaps(['2026'])).toEqual([]);
+    expect(quarterSequenceWithGaps([])).toEqual([]);
+  });
+
+  it('consecutive quarters produce no holes', () => {
+    expect(quarterSequenceWithGaps(['Q1 2026', 'Q2 2026', 'Q3 2026'])).toEqual([
+      'Q1 2026', 'Q2 2026', 'Q3 2026',
+    ]);
+  });
+});

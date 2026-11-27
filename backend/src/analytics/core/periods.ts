@@ -75,3 +75,65 @@ export function isNextQuarter(a: string, b: string): boolean {
   const pb = parsePeriod(b);
   return !!pa && !!pb && pa.kind === 'quarter' && pb.kind === 'quarter' && pb.ordinal === pa.ordinal + 1;
 }
+
+// ── Granularity ────────────────────────────────────────────────────
+// Quarterly ("Q3 2026") and annual ("2026") series never share one time axis:
+// an annual figure is not comparable to a quarter, and plotting both on the
+// same axis invites double-counting. Charts split series by granularity first.
+
+export type PeriodGranularity = 'quarter' | 'annual';
+
+/** Which granularity a period string is; null when unparseable. */
+export function periodGranularity(p: string): PeriodGranularity | null {
+  const parsed = parsePeriod(p);
+  if (!parsed) return null;
+  return parsed.kind === 'quarter' ? 'quarter' : 'annual';
+}
+
+/**
+ * Split periods by granularity, each side deduped and ordered by ordinal
+ * (never string sort). Unparseable periods are dropped from both — callers
+ * decide how to surface them (flagged, not silently sorted).
+ */
+export function splitByGranularity(periods: Array<string | null | undefined>): {
+  quarterly: string[];
+  annual: string[];
+  unparseable: string[];
+} {
+  const quarterly = new Set<string>();
+  const annual = new Set<string>();
+  const unparseable = new Set<string>();
+  for (const p of periods) {
+    if (typeof p !== 'string' || !p.trim()) continue;
+    const g = periodGranularity(p);
+    if (g === 'quarter') quarterly.add(p.trim().replace(/\s+/, ' '));
+    else if (g === 'annual') annual.add(p.trim().replace(/\s+/, ' '));
+    else unparseable.add(p.trim());
+  }
+  const byOrdinal = (a: string, b: string) => comparePeriods(a, b);
+  return {
+    quarterly: Array.from(quarterly).sort(byOrdinal),
+    annual: Array.from(annual).sort(byOrdinal),
+    unparseable: Array.from(unparseable).sort(),
+  };
+}
+
+/**
+ * Quarterly periods, ordinal-ordered, with null holes for every missing
+ * quarter between the first and last observed — a gap stays a gap on the
+ * chart axis instead of being silently squeezed out. Annual periods are
+ * ignored (they belong on a separate axis).
+ */
+export function quarterSequenceWithGaps(periods: Array<string | null | undefined>): Array<string | null> {
+  const { quarterly } = splitByGranularity(periods);
+  if (quarterly.length === 0) return [];
+  const first = parsePeriod(quarterly[0])!;
+  const last = parsePeriod(quarterly[quarterly.length - 1])!;
+  const present = new Set(quarterly);
+  const out: Array<string | null> = [];
+  for (let o = first.ordinal; o <= last.ordinal; o++) {
+    const label = `Q${(o % 4) + 1} ${Math.floor(o / 4)}`;
+    out.push(present.has(label) ? label : null);
+  }
+  return out;
+}
