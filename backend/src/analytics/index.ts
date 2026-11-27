@@ -11,3 +11,4 @@ export * from './services/overview';
 export * from './services/quality';
 export * from './services/dashboard';
 export * from './services/observations';
+export * from './services/charts';

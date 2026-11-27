@@ -183,6 +183,8 @@ model Workspace {
   templates       ExtractionTemplate[]
   covenantDefinitions CovenantDefinition[]
 
+  savedChartViews SavedChartView[]
+
   @@index([slug])
 }
 
@@ -735,6 +737,23 @@ model CovenantResult {
 
   @@unique([definitionId, period])
   @@index([definitionId, period])
+}
+
+// Saved chart views (chart engine): a validated ChartSpec + name, scoped to
+// a workspace and user; pinned views render on the Dashboard. Additive only.
+model SavedChartView {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  name        String
+  spec        Json      // validated ChartSpec (whitelisted dataset/filters/intent/chart)
+  pinned      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId])
 }
 
 // ── Notifications, audit, jobs ───────────────────────────────────────────

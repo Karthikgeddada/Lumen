@@ -57,6 +57,7 @@ const EXPECTED_PREFIXES = [
   '/api',
   '/api',
   '/api',
+  '/api',
   '/api/notifications',
 ];
 
@@ -159,6 +160,12 @@ describe('route table', () => {
         "POST /api/covenants/:definitionId/cure",
         "DELETE /api/covenants/:definitionId",
         "GET /api/workspaces/:workspaceId/quality",
+        "GET /api/:workspaceId/charts/catalog",
+        "POST /api/:workspaceId/charts/data",
+        "GET /api/:workspaceId/charts/views",
+        "POST /api/:workspaceId/charts/views",
+        "PATCH /api/:workspaceId/charts/views/:viewId",
+        "DELETE /api/:workspaceId/charts/views/:viewId",
         "GET /api/workspaces/:workspaceId/dashboard",
         "GET /api/notifications/",
         "POST /api/notifications/read",

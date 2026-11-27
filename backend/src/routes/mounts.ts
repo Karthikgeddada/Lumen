@@ -16,6 +16,7 @@ import questionnaireRoutes from './questionnaires';
 import analyticsRoutes from '../analytics/routes/analytics';
 import covenantRoutes from './covenants';
 import qualityRoutes from '../analytics/routes/quality';
+import chartsRoutes from '../analytics/routes/charts';
 import dashboardRoutes from './dashboard';
 import notificationRoutes from './notifications';
 
@@ -33,6 +34,7 @@ export const MOUNTS: Mount[] = [
   { prefix: '/api', router: analyticsRoutes },
   { prefix: '/api', router: covenantRoutes },
   { prefix: '/api', router: qualityRoutes },
+  { prefix: '/api', router: chartsRoutes },
   { prefix: '/api', router: dashboardRoutes },
   { prefix: '/api/notifications', router: notificationRoutes },
 ];
