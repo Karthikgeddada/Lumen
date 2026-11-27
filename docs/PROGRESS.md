@@ -84,3 +84,10 @@ Update after every item; commit + push each time. On restart: resume the first u
 - [ ] Z2 Merge to main once; additive migrations auto-apply on boot.
 - [ ] Z3 Verify Render deploy + /api/health once.
 - [ ] Z4 Final report (≤30 lines).
+
+## Chart Engine Progress (feat/chart-engine)
+
+- [x] Item 0: CI pipelines job fixed (clean-venv pytest; exit-2 was runner plugin pollution, not test failures).
+- [x] Item 1: analytics module layered core/services/routes (move-only), dependency-rule test enforced, docs (AGENTS.md, ARCHITECTURE.md §11, ANALYTICS_MODULE.md).
+- [x] Item 2: units layer (analytics/core/units.ts) + period granularity helpers — pure, fully tested.
+- [x] Item 3: single observation writer (analytics/services/observations.ts) + append-only ObservationRevision + GET revisions endpoint. Backend gates: tsc clean, 226/226 Vitest; route table 84.
