@@ -5,6 +5,7 @@ import { chatJson, hasAI, aiUnavailableMessage } from './ai';
 import { retrieve, buildContext, RetrievedChunk, ANTI_INJECTION_RULES } from './rag';
 import { sendCovenantBreachEmail } from './mailer';
 import { evaluateCovenant, isFreshBreach } from '../analytics/core/trust';
+import { writeObservation } from '../analytics';
 import {
   evaluateFormulaCovenant,
   computeNearBreach,
@@ -205,27 +206,24 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
       unresolved: inheritsUnresolved,
       ...(inheritsUnresolved ? { flags: ['input scale unresolved — see lineage'] } : {}),
     };
-    const obs = await prisma.metricObservation.upsert({
-      where: { entityId_metricKey_period: { entityId, metricKey: def.key, period: targetPeriod } },
-      create: {
-        entityId,
-        metricKey: def.key,
-        label: def.label,
-        period: targetPeriod,
-        value: outcome.value,
-        unit: def.unit,
-        derivation: 'CALCULATED',
-        scale: calcScale,
-        inputs: outcome.lineage as unknown as Prisma.InputJsonValue,
-      },
-      update: {
-        value: outcome.value,
-        unit: def.unit,
-        derivation: 'CALCULATED',
-        scale: calcScale,
-        inputs: outcome.lineage as unknown as Prisma.InputJsonValue,
-      },
+    // Single writer (analytics barrel): upsert + append-only revision history.
+    const result = await writeObservation({
+      workspaceId,
+      entityId,
+      metricKey: def.key,
+      label: def.label,
+      period: targetPeriod,
+      value: outcome.value,
+      unit: def.unit,
+      derivation: 'CALCULATED',
+      scale: calcScale,
+      inputs: outcome.lineage as unknown as Prisma.InputJsonValue,
+      reason: 'calculated recompute',
+      guard: 'allow', // a recomputed formula legitimately replaces its own output
+      triggerRetest: false, // this IS the covenant run
     });
+    if (result.outcome === 'conflict') continue; // unreachable: recompute uses guard 'allow' — type-narrowing only
+    const obs = result.observation;
     // Make the fresh value visible to later definitions in this same run
     // (dependent formulas) and to the evaluation loop below.
     observations.push({

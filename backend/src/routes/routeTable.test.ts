@@ -146,6 +146,7 @@ describe('route table', () => {
         "DELETE /api/:workspaceId/analytics/entities/:entityId",
         "GET /api/:workspaceId/analytics/overview",
         "POST /api/:workspaceId/analytics/observations",
+        "GET /api/analytics/observations/:observationId/revisions",
         "GET /api/:workspaceId/analytics/reports",
         "POST /api/:workspaceId/analytics/reports",
         "DELETE /api/analytics/reports/:reportId",

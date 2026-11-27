@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../prisma';
 import { parseNumericValueDetailed } from '../../services/normalizer';
 import { runCovenantTests } from '../../services/covenants';
-import { ingestConflict, IngestConflict, sameNumber, scaleUnresolved } from '../core/trust';
+import { IngestConflict, scaleUnresolved } from '../core/trust';
+import { writeObservation } from './observations';
 
 // Analytics are derived from actual stored data — extraction results and
 // metric observations — and every value keeps its derivation (REPORTED /
@@ -143,60 +144,34 @@ export async function ingestFromExtraction(
     const period = r.document.name.match(/(Q[1-4]\s?\d{4}|\d{4})/i)?.[0]?.replace(/\s/, ' ') ?? null;
     if (!period) continue;
 
-    // Overwrite guard: never silently replace a stored observation that
-    // already carries a different figure. Same value -> refresh metadata;
-    // different value -> skip and report the conflict for a human.
-    const existing = await prisma.metricObservation.findUnique({
-      where: { entityId_metricKey_period: { entityId: entity.id, metricKey: r.field.key, period } },
+    // Single writer (analytics/services/observations.ts) with the overwrite
+    // guard: a stored figure that differs is refused and reported for a human,
+    // never silently replaced; same value refreshes metadata (and now appends
+    // a revision capturing the previous state).
+    const result = await writeObservation({
+      workspaceId,
+      entityId: entity.id,
+      entityName: entity.name,
+      metricKey: r.field.key,
+      label: r.field.label,
+      period,
+      value: numeric,
+      unit: r.unit ?? '',
+      derivation: 'AI_INFERRED', // the figure now comes from extraction — true on update too
+      confidence: r.confidence,
+      sourceDocumentId: r.documentId,
+      sourcePage: r.page,
+      sourceExcerpt: r.excerpt,
+      scale: scaleInfo ? ({ ...scaleInfo, unresolved: false } as Prisma.InputJsonValue) : null,
+      extractionResultId: r.id,
+      reason: 'ingest from extraction',
+      guard: 'overwrite',
+      triggerRetest: false, // batched below: one retest per affected period
     });
-    if (existing && !sameNumber(existing.value, numeric)) {
-      conflicts.push(
-        ingestConflict(
-          entity.name,
-          r.field.key,
-          period,
-          { value: existing.value, derivation: existing.derivation, sourceDocumentId: existing.sourceDocumentId },
-          { value: numeric, sourceDocumentId: r.documentId },
-        ),
-      );
+    if (result.outcome === 'conflict') {
+      conflicts.push(result.conflict);
       continue;
     }
-
-    await prisma.metricObservation.upsert({
-      where: {
-        entityId_metricKey_period: {
-          entityId: entity.id,
-          metricKey: r.field.key,
-          period,
-        },
-      },
-      create: {
-        entityId: entity.id,
-        metricKey: r.field.key,
-        label: r.field.label,
-        period,
-        value: numeric,
-        unit: r.unit ?? '',
-        derivation: 'AI_INFERRED',
-        confidence: r.confidence,
-        sourceDocumentId: r.documentId,
-        sourcePage: r.page,
-        sourceExcerpt: r.excerpt,
-        scale: (scaleInfo ? { ...scaleInfo, unresolved: false } : null) ?? Prisma.JsonNull,
-        extractionResultId: r.id,
-      },
-      update: {
-        value: numeric,
-        unit: r.unit ?? '',
-        derivation: 'AI_INFERRED', // the figure now comes from extraction — set it on update too
-        confidence: r.confidence,
-        sourceDocumentId: r.documentId,
-        sourcePage: r.page,
-        sourceExcerpt: r.excerpt,
-        scale: (scaleInfo ? { ...scaleInfo, unresolved: false } : null) ?? Prisma.JsonNull,
-        extractionResultId: r.id,
-      },
-    });
     affectedPeriods.add(period);
     created++;
   }

@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { prisma } from '../../prisma';
 import { ApiError, asyncH } from '../../middleware/error';
 import { requireAuth, requireWorkspace } from '../../middleware/auth';
-import { runCovenantTests } from '../../services/covenants';
 import { audit } from '../../utils';
 import { entityOverview } from '../services/overview';
+import { writeObservation } from '../services/observations';
 
 const router = Router();
 
@@ -106,16 +106,43 @@ router.post(
     const entity = await prisma.entity.findFirst({ where: { id: body.entityId, workspaceId: req.ws!.id } });
     if (!entity) throw new ApiError(404, 'NOT_FOUND', 'Entity not found.');
 
-    const observation = await prisma.metricObservation.upsert({
-      where: { entityId_metricKey_period: { entityId: body.entityId, metricKey: body.metricKey, period: body.period.replace(/\s/, ' ') } },
-      create: { ...body, period: body.period.replace(/\s/, ' ') },
-      update: { ...body, period: body.period.replace(/\s/, ' ') },
+    // Single writer (analytics/services/observations.ts): upsert semantics,
+    // append-only revision history, and the automatic covenant re-test.
+    const result = await writeObservation({
+      workspaceId: entity.workspaceId,
+      entityId: entity.id,
+      metricKey: body.metricKey,
+      label: body.label,
+      period: body.period.replace(/\s/, ' '),
+      value: body.value,
+      unit: body.unit,
+      derivation: body.derivation,
+      sourceDocumentId: body.sourceDocumentId,
+      sourcePage: body.sourcePage,
+      sourceExcerpt: body.sourceExcerpt,
+      changedById: req.auth!.userId,
+      reason: 'manual entry',
+      guard: 'allow', // manual edits may replace values; history keeps the previous state
+      updateLabel: true, // manual edits also correct labels
     });
-    // Automatic compliance: re-test this entity's covenants for the affected
-    // period whenever a number lands. Fire-and-forget — entry must never fail
-    // because of the retest.
-    void runCovenantTests(entity.workspaceId, entity.id, body.period.replace(/\s/, ' ')).catch(() => {});
-    res.status(201).json({ observation });
+    if (result.outcome === 'conflict') throw new ApiError(409, 'CONFLICT', 'Unexpected conflict.'); // unreachable: manual edits use guard 'allow'
+    res.status(201).json({ observation: result.observation });
+  }),
+);
+
+// Revision history for one observation: append-only, newest first, bounded.
+// New capability — new endpoint; the observation endpoint shapes are unchanged.
+router.get(
+  '/analytics/observations/:observationId/revisions',
+  requireAuth,
+  requireWorkspace('VIEWER'),
+  asyncH(async (req, res) => {
+    const observation = await prisma.metricObservation.findFirst({
+      where: { id: req.params.observationId, entity: { workspaceId: req.ws!.id } },
+      include: { revisions: { orderBy: { changedAt: 'desc' }, take: 100 } },
+    });
+    if (!observation) throw new ApiError(404, 'NOT_FOUND', 'Observation not found.');
+    res.json({ revisions: observation.revisions });
   }),
 );
 

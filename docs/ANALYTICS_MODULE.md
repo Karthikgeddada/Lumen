@@ -56,3 +56,39 @@ Via `../analytics/core/<module>` for direct core imports.
    expectations — `vitest run -u` updates the snapshot deliberately.
 4. Outsiders import only the barrel or core;
    `analytics/dependencyRules.test.ts` fails CI otherwise.
+
+## Units layer (core/units.ts) — chart engine item 2
+
+Free-text units parse to `{dimension, currency, scale, label, unitUnresolved}`:
+`USD millions/billions`, `%`, `x`, counts (`days`, `employees`, …), `$ in 000`,
+`$m/usd bn`, EUR/GBP/CAD/CHF/JPY/INR. `normalizeValue()` folds scale words to
+base currency units; `canAggregateUnits()` is the cross-metric gate (same
+dimension + same named currency; scale words without a currency marker parse
+with `currency: null` so they never mix with named currencies); anything
+unrecognizable or dimension-conflicting (`USD %`) is **unit unresolved** —
+flagged, never guessed, excluded from aggregation. `chooseDisplayUnit()` picks
+friendly chart magnitudes. Period granularity (`core/periods.ts`):
+`periodGranularity`, `splitByGranularity` (quarterly and annual never share a
+time axis; ordinal ordering only), `quarterSequenceWithGaps` (a gap stays a
+visible gap on the axis).
+
+## Single observation writer (services/observations.ts) — chart engine item 3
+
+`writeObservation()` is the SINGLE writer of `MetricObservation`. The manual
+observations endpoint, ingest-from-extraction, and the calculated-metric
+recompute inside covenant runs all route through it. It owns: upsert semantics
+on `(entityId, metricKey, period)`; the overwrite guard (`guard: 'overwrite'`
+refuses to replace a differing stored figure — ingest; `guard: 'allow'`
+overwrites — manual/recompute); scale-JSON and field-by-field update semantics
+(undefined = leave untouched, explicit null = clear, and labels are updated
+only when `updateLabel: true` — manual only); and the fire-and-forget covenant
+re-test (skipped per-write for bulk ingest, which batches one retest per
+affected period).
+
+Every update appends an `ObservationRevision` (additive model, migration
+`20261127090000_observation_revisions`) capturing the PREVIOUS state (value,
+unit, derivation, scale, source doc/page/excerpt, changedBy, reason) in the
+same transaction — append-only, never rewritten. Read path:
+`GET /api/analytics/observations/:observationId/revisions` (VIEWER,
+workspace-scoped, 404-not-403, newest first, bounded take 100). Route table is
+now 84 routes; the snapshot gained exactly that one line.

@@ -611,9 +611,32 @@ model MetricObservation {
   createdAt         DateTime   @default(now())
 
   entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  revisions ObservationRevision[]
 
   @@unique([entityId, metricKey, period])
   @@index([entityId, metricKey])
+}
+
+// Append-only revision history for MetricObservation — written (only) by the
+// single observation writer (analytics/services/observations.ts) on every
+// change, capturing the PREVIOUS state. Never rewritten, never edited.
+model ObservationRevision {
+  id                       String    @id @default(cuid())
+  observationId            String
+  previousValue            Float?
+  previousUnit             String?
+  previousDerivation       Derivation?
+  previousScale            Json?
+  previousSourceDocumentId String?
+  previousSourcePage       Int?
+  previousSourceExcerpt    String?   @db.Text
+  changedById              String?   // user on manual edits; null = system (ingest/recompute)
+  reason                   String    // 'manual entry' | 'ingest from extraction' | 'calculated recompute'
+  changedAt                DateTime  @default(now())
+
+  observation MetricObservation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+
+  @@index([observationId, changedAt])
 }
 
 model Report {
