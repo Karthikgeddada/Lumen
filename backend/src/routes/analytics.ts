@@ -10,6 +10,73 @@ import { seedPackageItems } from '../services/borrowers';
 
 const router = Router();
 
+// Group structure limits (Data Room phase 1): company → subsidiary → sub-subsidiary.
+const MAX_ENTITY_DEPTH = 3;
+
+// Depth of an entity in the group tree (top-level = 1). Walks up via parentId.
+async function entityDepth(entityId: string): Promise<number> {
+  let depth = 1;
+  let cursor: string | null = entityId;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const step: { parentId: string | null } | null = await prisma.entity.findUnique({
+      where: { id: cursor },
+      select: { parentId: true },
+    });
+    if (!step) break;
+    cursor = step.parentId;
+    if (cursor) depth += 1;
+  }
+  return depth;
+}
+
+// Height of the subtree below an entity (1 for a leaf). Defensive against
+// cycles; the authoritative cycle guard runs before any move is applied.
+async function entityHeight(entityId: string): Promise<number> {
+  const children = await prisma.entity.findMany({ where: { parentId: entityId }, select: { id: true } });
+  let height = 1;
+  for (const child of children) {
+    height = Math.max(height, 1 + (await entityHeight(child.id)));
+  }
+  return height;
+}
+
+async function assertParentAllowed(parentId: string, workspaceId: string, entityId?: string) {
+  if (entityId && parentId === entityId) {
+    throw new ApiError(400, 'INVALID_PARENT', 'A company cannot be its own parent.');
+  }
+  const parent = await prisma.entity.findFirst({ where: { id: parentId, workspaceId } });
+  if (!parent) throw new ApiError(404, 'NOT_FOUND', 'Parent company not found.');
+  // Cycle guard: the proposed parent must not sit inside the entity's subtree.
+  if (entityId) {
+    let cursor: string | null = parent.id;
+    const seen = new Set<string>();
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      if (cursor === entityId) throw new ApiError(400, 'INVALID_PARENT', 'Cannot nest a company inside its own subsidiary.');
+      const step: { parentId: string | null } | null = await prisma.entity.findUnique({
+        where: { id: cursor },
+        select: { parentId: true },
+      });
+      cursor = step?.parentId ?? null;
+    }
+    // Depth guard: new-parent depth + subtree height must fit the limit.
+    const parentDepth = await entityDepth(parent.id);
+    const height = await entityHeight(entityId);
+    if (parentDepth + height > MAX_ENTITY_DEPTH) {
+      throw new ApiError(400, 'DEPTH_LIMIT', `Group structures can nest at most ${MAX_ENTITY_DEPTH} levels (company → subsidiary → sub-subsidiary).`);
+    }
+  } else {
+    // Creating a new child: parent depth + 1 must fit.
+    const parentDepth = await entityDepth(parent.id);
+    if (parentDepth + 1 > MAX_ENTITY_DEPTH) {
+      throw new ApiError(400, 'DEPTH_LIMIT', `Group structures can nest at most ${MAX_ENTITY_DEPTH} levels (company → subsidiary → sub-subsidiary).`);
+    }
+  }
+  return parent;
+}
+
 // Entities (companies / funds / plants the analytics track)
 router.get(
   '/:workspaceId/analytics/entities',
@@ -38,14 +105,56 @@ router.post(
       })
       .parse(req.body);
     if (body.parentId) {
-      const parent = await prisma.entity.findFirst({ where: { id: body.parentId, workspaceId: req.ws!.id } });
-      if (!parent) throw new ApiError(404, 'NOT_FOUND', 'Parent company not found.');
+      await assertParentAllowed(body.parentId, req.ws!.id);
     }
     const entity = await prisma.entity.create({
       data: { workspaceId: req.ws!.id, name: body.name, parentId: body.parentId ?? null },
     });
     await seedPackageItems(entity.id); // default quarterly package for the new borrower
+    await audit({ workspaceId: req.ws!.id, actorId: req.auth!.userId, action: 'entity.created', targetType: 'entity', targetId: entity.id, meta: { name: entity.name, parentId: entity.parentId } });
     res.status(201).json({ entity });
+  }),
+);
+
+// Set or clear an entity's parent (group structure editing).
+router.patch(
+  '/:workspaceId/analytics/entities/:entityId',
+  requireAuth,
+  requireWorkspace('EDITOR'),
+  asyncH(async (req, res) => {
+    const body = z
+      .object({
+        name: z.string().trim().min(1).max(120).optional(),
+        // null clears the parent (promotes to top-level company).
+        parentId: z.string().nullable().optional(),
+      })
+      .parse(req.body);
+    const entity = await prisma.entity.findFirst({
+      where: { id: req.params.entityId, workspaceId: req.ws!.id },
+    });
+    if (!entity) throw new ApiError(404, 'NOT_FOUND', 'Entity not found.');
+
+    if (body.parentId) {
+      await assertParentAllowed(body.parentId, req.ws!.id, entity.id);
+    }
+    const updated = await prisma.entity.update({
+      where: { id: entity.id },
+      data: {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.parentId !== undefined ? { parentId: body.parentId } : {}),
+      },
+    });
+    if (body.parentId !== undefined) {
+      await audit({
+        workspaceId: req.ws!.id,
+        actorId: req.auth!.userId,
+        action: body.parentId ? 'entity.parent_set' : 'entity.parent_cleared',
+        targetType: 'entity',
+        targetId: entity.id,
+        meta: { name: entity.name, parentId: body.parentId },
+      });
+    }
+    res.json({ entity: updated });
   }),
 );
 

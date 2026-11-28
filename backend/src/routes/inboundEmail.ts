@@ -14,8 +14,8 @@ import { SUPPORTED_EXTENSIONS, extOf } from '../services/parsers';
 // provider (SendGrid Inbound Parse, Postmark inbound, Mailgun routes,
 // Cloudflare Email Workers…). Each supported attachment is ingested into the
 // Data Room exactly like a user upload: object storage, Document row, worker
-// queue — but into the workspace's "Email Inbox" collection, with the
-// sender/subject kept on the document for triage.
+// queue — but it lands in the Unassigned inbox (no folder) with
+// assignmentStatus NEEDS_CONFIRMATION, keeping sender/subject for triage.
 
 const router = Router();
 
@@ -26,8 +26,6 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: config.maxUploadBytes, files: 20 },
 });
-
-const EMAIL_INBOX = 'Email Inbox';
 
 // Pull every email address out of any shape providers send: display headers
 // ("Name <a@b.com>"), comma lists, JSON strings (SendGrid's `envelope`),
@@ -117,30 +115,6 @@ router.post(
       return;
     }
 
-    // Ensure the Email Inbox collection exists (documents are filed here for
-    // manual triage into company folders; concurrent creation races are fine).
-    let inbox = await prisma.collection.findFirst({
-      where: { workspaceId: ws.id, name: EMAIL_INBOX, deletedAt: null },
-      select: { id: true },
-    });
-    if (!inbox) {
-      try {
-        inbox = await prisma.collection.create({
-          data: {
-            workspaceId: ws.id, name: EMAIL_INBOX,
-            description: 'Attachments received via the workspace inbound email address',
-            createdById: ws.createdById,
-          },
-          select: { id: true },
-        });
-      } catch {
-        inbox = await prisma.collection.findFirst({
-          where: { workspaceId: ws.id, name: EMAIL_INBOX, deletedAt: null },
-          select: { id: true },
-        });
-      }
-    }
-
     const created: string[] = [];
     const rejected: { file: string; reason: string }[] = [];
 
@@ -154,7 +128,7 @@ router.post(
       const doc = await prisma.document.create({
         data: {
           workspaceId: ws.id,
-          collectionId: inbox?.id ?? null,
+          collectionId: null, // Unassigned inbox — no folder until triage
           name: att.name,
           fileType: ext,
           mimeType: att.mimeType,
@@ -166,6 +140,9 @@ router.post(
           emailFrom: from,
           emailSubject: subject,
           emailReceivedAt: new Date(),
+          // Triage: unassigned + flagged, so the Data Room inbox can prompt for
+          // confirm (tag to company) or dismiss.
+          assignmentStatus: 'NEEDS_CONFIRMATION',
         },
       });
 

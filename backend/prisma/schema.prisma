@@ -160,7 +160,8 @@ model Workspace {
   name      String
   slug      String   @unique
   // Dedicated inbound address — email attachments sent here are ingested into
-  // this workspace's Data Room "Email Inbox" folder by the inbound-email webhook.
+  // this workspace's Unassigned inbox (with sender/subject kept on the
+  // document) by the inbound-email webhook.
   inboundEmail String? @unique
   industry  String   @default("Business")
   plan      String   @default("trial") // trial ends 14 days after createdAt
@@ -240,17 +241,25 @@ model Collection {
   name        String
   description String?
   parentId    String?
+  // Data Room scoping: a folder can belong to one company/subsidiary (entity).
+  // PERIOD folders ("Q3 2026" etc.) are always entity-scoped; CUSTOM folders
+  // may be workspace-level. Deleting an entity detaches its folders (SetNull).
+  entityId    String?
+  kind        String    @default("CUSTOM") // PERIOD | CUSTOM
+  periodKey   String?
   createdById String
   createdAt   DateTime  @default(now())
   deletedAt   DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   documents Document[]
+  entity    Entity?    @relation(fields: [entityId], references: [id], onDelete: SetNull)
   parent    Collection?  @relation("CollectionFolders", fields: [parentId], references: [id], onDelete: SetNull)
   children  Collection[] @relation("CollectionFolders")
 
   @@unique([workspaceId, name])
   @@index([parentId])
+  @@index([entityId])
 }
 
 model Document {
@@ -277,6 +286,10 @@ model Document {
   emailFrom    String?
   emailSubject String?
   emailReceivedAt DateTime?
+  // Data Room triage: emailed documents wait in the Unassigned inbox until a
+  // user confirms (tags to a company, possibly auto-filed) or dismisses the
+  // prompt. Regular uploads carry null (no triage needed).
+  assignmentStatus String? // NEEDS_CONFIRMATION | CONFIRMED | DISMISSED
   uploadedAt   DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   processedAt  DateTime?
@@ -606,6 +619,7 @@ model Entity {
   covenantDefinitions CovenantDefinition[]
   packageItems PackageItem[]
   documents   Document[]
+  collections Collection[]
 
   @@unique([workspaceId, name])
   @@index([parentId])

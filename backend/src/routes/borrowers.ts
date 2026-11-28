@@ -137,29 +137,46 @@ router.delete(
   }),
 );
 
-// Tag (or untag) a Data Room document to a borrower.
+// Tag (or untag) a Data Room document to a borrower. Tagging also resolves
+// email triage (assignmentStatus CONFIRMED); optional autoFile drops the
+// document into the company's current-quarter period folder when one exists.
 router.post(
   '/:workspaceId/borrowers/tag-document',
   requireAuth,
   requireWorkspace('EDITOR'),
   asyncH(async (req, res) => {
-    const body = z.object({ documentId: z.string(), entityId: z.string().nullable() }).parse(req.body);
+    const body = z.object({ documentId: z.string(), entityId: z.string().nullable(), autoFile: z.boolean().optional() }).parse(req.body);
     const doc = await prisma.document.findFirst({
       where: { id: body.documentId, workspaceId: req.ws!.id, deletedAt: null },
     });
     if (!doc) throw new ApiError(404, 'NOT_FOUND', 'Document not found.');
     if (body.entityId) await entityInWorkspace(body.entityId, req.ws!.id);
 
-    await prisma.document.update({ where: { id: doc.id }, data: { entityId: body.entityId } });
+    const data: { entityId: string | null; assignmentStatus: string | null; collectionId?: string } = {
+      entityId: body.entityId,
+      // Tagging confirms the triage; untagging an emailed document puts it
+      // back in the Unassigned inbox awaiting confirmation again.
+      assignmentStatus: body.entityId ? 'CONFIRMED' : doc.source === 'EMAIL' ? 'NEEDS_CONFIRMATION' : null,
+    };
+    if (body.entityId && body.autoFile) {
+      const quarter = lastNQuarters(1)[0];
+      const folder = await prisma.collection.findFirst({
+        where: { workspaceId: req.ws!.id, entityId: body.entityId, kind: 'PERIOD', periodKey: quarter, deletedAt: null },
+        select: { id: true },
+      });
+      if (folder) data.collectionId = folder.id;
+    }
+
+    await prisma.document.update({ where: { id: doc.id }, data });
     await audit({
       workspaceId: req.ws!.id,
       actorId: req.auth!.userId,
       action: body.entityId ? 'document.tagged' : 'document.untagged',
       targetType: 'document',
       targetId: doc.id,
-      meta: { entityId: body.entityId, name: doc.name },
+      meta: { entityId: body.entityId, name: doc.name, autoFiledTo: data.collectionId ?? null },
     });
-    res.json({ ok: true });
+    res.json({ ok: true, autoFiledTo: data.collectionId ?? null });
   }),
 );
 

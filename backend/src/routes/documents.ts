@@ -101,6 +101,9 @@ router.get(
     const { skip, take, page, limit } = paginate(req.query as Record<string, unknown>);
     const q = (req.query.q as string | undefined)?.trim();
     const collectionId = req.query.collectionId as string | undefined;
+    // entityId=none lists unassigned documents (the Data Room “Unassigned” inbox);
+    // any other value filters to that company/subsidiary.
+    const entityIdRaw = req.query.entityId as string | undefined;
     const status = req.query.status as string | undefined;
     const sort = (req.query.sort as 'name' | 'uploadedAt' | 'sizeBytes' | undefined) ?? 'uploadedAt';
     const order = (req.query.order as 'asc' | 'desc' | undefined) ?? 'desc';
@@ -110,6 +113,7 @@ router.get(
       deletedAt: null,
       ...(q ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
       ...(collectionId ? { collectionId } : {}),
+      ...(entityIdRaw ? { entityId: entityIdRaw === 'none' ? null : entityIdRaw } : {}),
       ...(status ? { status: status as never } : {}),
     };
 
@@ -123,8 +127,9 @@ router.get(
         select: {
           id: true, name: true, fileType: true, sizeBytes: true, pageCount: true,
           status: true, error: true, isDemo: true, uploadedAt: true, updatedAt: true, processedAt: true,
-          source: true, emailFrom: true, emailSubject: true,
+          source: true, emailFrom: true, emailSubject: true, assignmentStatus: true,
           collection: { select: { id: true, name: true } },
+          entity: { select: { id: true, name: true } },
           owner: { select: { id: true, firstName: true, lastName: true } },
         },
       }),
@@ -165,6 +170,10 @@ router.patch(
       .object({
         name: z.string().trim().min(1).max(200).optional(),
         collectionId: z.string().nullable().optional(),
+        // Triage only supports dismissing the confirmation prompt today;
+        // confirming goes through /borrowers/tag-document so package and audit
+        // stay in sync.
+        assignmentStatus: z.enum(['DISMISSED']).optional(),
       })
       .parse(req.body);
     if (body.collectionId) {
