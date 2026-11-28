@@ -8,7 +8,7 @@ import {
   LayoutGrid, Library, MessagesSquare, ClipboardCheck, FileSpreadsheet,
   LineChart, Settings, Search, Bell, ChevronsUpDown, Plus, LogOut,
   Check, FileText, PanelLeftClose, PanelLeftOpen, Scale, Gauge,
-  Briefcase,
+  Briefcase, FileBarChart,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
@@ -245,7 +245,7 @@ export function Shell({ children }: { children: ReactNode }) {
                       notifData!.notifications.map((n) => (
                         <Link key={n.id} href={n.link ?? '#'} onClick={() => setNotifMenu(false)} style={{
                           display: 'block', padding: '12px 18px', borderBottom: '1px solid var(--border)', textDecoration: 'none',
-                          background: n.readAt ? 'transparent' : 'rgba(0,113,227,0.03)',
+                          background: n.readAt ? 'transparent' : 'rgba(28,79,216,0.05)',
                         }}>
                           <div style={{ fontSize: 13, fontWeight: 540, color: 'var(--text-primary)' }}>{n.title}</div>
                           {n.body ? <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{n.body}</div> : null}

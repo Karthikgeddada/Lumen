@@ -31,7 +31,7 @@ interface CertEntity { id: string; name: string; parentId: string | null; certif
 
 const VERDICT_META: Record<string, { label: string; bg: string; color: string }> = {
   MATCH: { label: 'Match', bg: 'rgba(46,160,67,.15)', color: '#2ea043' },
-  WITHIN_TOLERANCE: { label: 'Within tolerance', bg: 'rgba(0,113,227,.12)', color: '#0a67d6' },
+  WITHIN_TOLERANCE: { label: 'Within tolerance', bg: 'rgba(28,79,216,.12)', color: '#153a94' },
   DIFFERS_MATERIALLY: { label: 'Differs materially', bg: 'rgba(220,38,38,.12)', color: '#dc2626' },
   CANNOT_COMPARE: { label: 'Cannot compare', bg: 'var(--sunken)', color: 'var(--text-muted)' },
 };
