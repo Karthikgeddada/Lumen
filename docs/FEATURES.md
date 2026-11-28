@@ -283,3 +283,33 @@ All charts run on Apache ECharts (Apache-2.0, free-OSS ✓), tree-shaken to the 
 **Cause:** the free Render host sleeps after ~15 min without traffic. The next request (e.g. typing "hi") wakes it but the in-flight request fails — the UI shows "failed to fetch". The feature itself is fine.
 
 **Fixes (in order):** external keep-alive ping every 10 min (free, immediate) → Render Starter $7/mo (guaranteed always-on) → Phase 0 always-on backend.
+
+---
+
+## Phases 1–7 — monitoring, intake & consolidation (2026-11-28)
+
+The complete quarterly-monitoring product: Data Room structure, three intake
+channels with a confirm gate, honest analytics with saved views, and group
+consolidation. All migrations additive.
+
+### Data Room (phase 1)
+- **Structure tree** — companies (borrowers) with subsidiaries, folders inside folders, and quarterly folders scoped to a company (`PERIOD` kind, e.g. "Q3 2026"); the left tree shows Unassigned / All documents / companies with document counts and a per-quarter package badge (received/expected). Legacy flat collections were NOT replaced — the existing `Collection` model was extended (`entityId`, `kind`, `periodKey`).
+- **Unassigned inbox** — documents with no company live in their own view; emailed documents arrive flagged `NEEDS_CONFIRMATION` (legacy "Email Inbox" collections soft-deleted, docs preserved and moved to unassigned — migration `20261129_phase2`).
+- **Email suggestion** — a sender/subject heuristic proposes the matching company ("File to Acme Corp") with one click, which also drops the file into the company's current-quarter folder; "Dismiss" keeps it unassigned without nagging.
+
+### Monitoring (phases 2–3)
+- **Certificates** (use case 4) — compliance-certificate documents are reconciled against stored observations of the same period: MATCH (≤1%), WITHIN_TOLERANCE (≤10%), DIFFERS_MATERIALLY, CANNOT_COMPARE, side by side with evidence on both sides (page numbers, source excerpts). Never overwrites anything.
+- **Reports** (use case 2) — per-company quarterly report (package grid, covenant grid, figures with derivation/confidence), printable, plus XLSX export; audit-log export for a date window. Scheduled reports re-run in the worker.
+
+### Upload dedupe & figure history (phase 4)
+- **Content-hash dedupe** — every upload and email attachment is sha256-hashed; exact duplicates are rejected per file with the reason ("Duplicate of X"), never silently dropped, never double-stored.
+- **Figure revision history** — every real overwrite of a stored figure (manual edit, formula recompute, later: consolidation) records an `ObservationRevision` (old → new value, derivations, who/when); the Data Quality page shows recent revisions.
+
+### Analytics Explore (phase 5)
+- **Explore tab** — pick companies × metrics × window; a rule-based recommendation picks the honest chart (multi-metric → indexed lines; single period → bars; else lines per company) and explains itself ("Why this chart?"). Missing observations render as gaps, never zeros. **Saved views** store the question, not a frozen picture — the chart re-recommends itself on every load.
+
+### Folder import (phase 6)
+- **Stage → preview → confirm** — a directory pick (up to 200 files) lands as a staged `IntakeBatch`: stored, hashed, deduped, junk skipped — but held out of the Data Room (`STAGED` documents are invisible everywhere) until the user reviews the exact folder tree it will create and confirms the destination (company and/or folder). Confirm files the tree, tags and enqueues the documents; "Decide later" keeps the batch resumable from the Add menu; "Discard" soft-deletes and releases its storage.
+
+### Group consolidation (phase 7)
+- **Consolidate group** — one button on a company with subsidiaries sums every child's figures per metric × period onto the group entity (`CALCULATED`), so covenants, reports and analytics read the group honestly. Ratio-like metrics (%, multiples, margins, coverage) are skipped as not summable; the group's own figures always win (only roll-up rows refresh); per-child lineage is stored; every refresh appears in the revision history; covenants retest automatically after.
