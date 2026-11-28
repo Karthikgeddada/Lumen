@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { useWorkspace } from '../../../lib/workspace';
-import { EmptyState, LoadingBlock } from '../../../components/ui';
+import { DerivationBadge, EmptyState, LoadingBlock, timeAgo } from '../../../components/ui';
 
 interface DocQuality {
   id: string; name: string; status: string; pageCount: number | null; processedAt: string | null;
@@ -21,6 +21,12 @@ interface QualityData {
   derivations: Record<string, number>;
   grounding: { documents: number; pagesUnderstood: number; citations: number; sections: number; tables: number; passages: number };
   documents: DocQuality[];
+}
+interface Revision {
+  id: string; entityId: string; entityName: string; metricKey: string; period: string;
+  oldValue: number; newValue: number;
+  oldDerivation: string; newDerivation: string;
+  source: string; actor: string | null; createdAt: string;
 }
 
 const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : null);
@@ -52,6 +58,9 @@ export default function Quality() {
 
   const { data, isLoading } = useSWR(wid ? `qual-${wid}` : null,
     () => api<QualityData>(`/api/workspaces/${wid}/quality`));
+  // Figure revision history — every real overwrite of a stored number.
+  const { data: revData } = useSWR(wid ? `qual-rev-${wid}` : null,
+    () => api<{ revisions: Revision[] }>(`/api/workspaces/${wid}/quality/revisions`));
   const q = data;
 
   if (isLoading || (!data && wid)) return <main className="content"><LoadingBlock label="Loading quality…" /></main>;
@@ -204,6 +213,41 @@ export default function Quality() {
               </table>
             </div>
           </div>
+
+          {/* Figure revisions — who changed a stored number, when, from what to what. */}
+          {revData?.revisions?.length ? (
+            <div className="card" style={{ marginTop: 16 }}>
+              <div className="card-header">
+                <div className="card-title">Figure revisions</div>
+                <span className="card-sub">every real overwrite of a stored figure — manual edit or formula recompute</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="table">
+                  <thead><tr><th>Company</th><th>Figure</th><th>Period</th><th>Changed</th><th>Derivation</th><th>By</th></tr></thead>
+                  <tbody>
+                    {revData.revisions.map((r) => (
+                      <tr key={r.id}>
+                        <td className="strong">{r.entityName}</td>
+                        <td className="mono">{r.metricKey}</td>
+                        <td>{r.period}</td>
+                        <td>
+                          <span className="mono" style={{ color: 'var(--text-muted)' }}>{r.oldValue.toLocaleString()}</span>
+                          <span style={{ color: 'var(--text-muted)', margin: '0 5px' }}>→</span>
+                          <span className="mono" style={{ fontWeight: 700 }}>{r.newValue.toLocaleString()}</span>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <DerivationBadge d={r.oldDerivation} /> <span style={{ color: 'var(--text-muted)', margin: '0 2px' }}>→</span> <DerivationBadge d={r.newDerivation} />
+                        </td>
+                        <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                          {r.actor ?? (r.source === 'MANUAL' ? 'Manual entry' : 'Formula recompute')} · {timeAgo(r.createdAt)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           <div style={{ display: 'flex', gap: 8, marginTop: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>
             <Quote size={13} style={{ flexShrink: 0, marginTop: 1 }} />

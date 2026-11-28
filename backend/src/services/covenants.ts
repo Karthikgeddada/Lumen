@@ -205,6 +205,9 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
       unresolved: inheritsUnresolved,
       ...(inheritsUnresolved ? { flags: ['input scale unresolved — see lineage'] } : {}),
     };
+    // Revision history: the row fetched at the start of the run is the prior
+    // value; a recompute that actually changes the number leaves a trail.
+    const priorObs = observations.find((o) => o.metricKey === def.key && o.period === targetPeriod);
     const obs = await prisma.metricObservation.upsert({
       where: { entityId_metricKey_period: { entityId, metricKey: def.key, period: targetPeriod } },
       create: {
@@ -226,6 +229,23 @@ export async function runCovenantTests(workspaceId: string, entityId: string, pe
         inputs: outcome.lineage as unknown as Prisma.InputJsonValue,
       },
     });
+    if (priorObs && priorObs.value !== outcome.value) {
+      await prisma.observationRevision.create({
+        data: {
+          workspaceId,
+          observationId: obs.id,
+          entityId,
+          metricKey: def.key,
+          period: targetPeriod,
+          oldValue: priorObs.value,
+          newValue: outcome.value,
+          oldDerivation: priorObs.derivation,
+          newDerivation: 'CALCULATED',
+          source: 'RECALC',
+          actorId: null, // system recompute
+        },
+      }).catch(() => {}); // history must never break the retest
+    }
     // Make the fresh value visible to later definitions in this same run
     // (dependent formulas) and to the evaluation loop below.
     observations.push({

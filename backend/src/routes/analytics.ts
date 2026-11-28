@@ -229,11 +229,43 @@ router.post(
     const entity = await prisma.entity.findFirst({ where: { id: body.entityId, workspaceId: req.ws!.id } });
     if (!entity) throw new ApiError(404, 'NOT_FOUND', 'Entity not found.');
 
-    const observation = await prisma.metricObservation.upsert({
-      where: { entityId_metricKey_period: { entityId: body.entityId, metricKey: body.metricKey, period: body.period.replace(/\s/, ' ') } },
-      create: { ...body, period: body.period.replace(/\s/, ' ') },
-      update: { ...body, period: body.period.replace(/\s/, ' ') },
+    const period = body.period.replace(/\s/, ' ');
+    // Revision history: capture the prior row so a real overwrite is recorded.
+    const prior = await prisma.metricObservation.findUnique({
+      where: { entityId_metricKey_period: { entityId: body.entityId, metricKey: body.metricKey, period } },
     });
+
+    const observation = await prisma.metricObservation.upsert({
+      where: { entityId_metricKey_period: { entityId: body.entityId, metricKey: body.metricKey, period } },
+      create: { ...body, period },
+      update: { ...body, period },
+    });
+    if (prior && prior.value !== observation.value) {
+      await prisma.observationRevision.create({
+        data: {
+          workspaceId: entity.workspaceId,
+          observationId: observation.id,
+          entityId: body.entityId,
+          metricKey: body.metricKey,
+          period,
+          oldValue: prior.value,
+          newValue: observation.value,
+          oldDerivation: prior.derivation,
+          newDerivation: observation.derivation,
+          source: 'MANUAL',
+          actorId: req.auth!.userId,
+        },
+      });
+      await audit({
+        workspaceId: entity.workspaceId,
+        actorId: req.auth!.userId,
+        action: 'observation.revised',
+        targetType: 'metric_observation',
+        targetId: observation.id,
+        meta: { metricKey: body.metricKey, period, from: prior.value, to: observation.value },
+        ip: req.ip,
+      });
+    }
     // Automatic compliance: re-test this entity's covenants for the affected
     // period whenever a number lands. Fire-and-forget — entry must never fail
     // because of the retest.

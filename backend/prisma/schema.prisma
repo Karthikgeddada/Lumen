@@ -118,6 +118,7 @@ model User {
   notifications   Notification[]
   auditEvents     AuditEvent[]      @relation("AuditActor")
   documents       Document[]
+  observationRevisions ObservationRevision[] @relation("RevisionActor")
 
   @@index([email])
 }
@@ -186,6 +187,7 @@ model Workspace {
   auditEvents     AuditEvent[]
   templates       ExtractionTemplate[]
   covenantDefinitions CovenantDefinition[]
+  observationRevisions ObservationRevision[]
 
   @@index([slug])
 }
@@ -294,6 +296,8 @@ model Document {
   updatedAt    DateTime       @updatedAt
   processedAt  DateTime?
   deletedAt    DateTime?
+  // sha256 of the file bytes — duplicate detection on upload/email intake.
+  contentHash String?
 
   workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   collection Collection?       @relation(fields: [collectionId], references: [id])
@@ -312,6 +316,7 @@ model Document {
   @@index([collectionId])
   @@index([entityId])
   @@index([workspaceId, name])
+  @@index([workspaceId, contentHash])
 }
 
 // Structure extracted from a document: headings, paragraphs, footnotes.
@@ -669,6 +674,32 @@ model MetricObservation {
 
   @@unique([entityId, metricKey, period])
   @@index([entityId, metricKey])
+}
+
+// One row per real overwrite of a stored metric figure. Upsert guards elsewhere
+// keep conflicting ingest values out; a revision is recorded whenever an
+// existing observation's value actually changes (manual edit or formula
+// recompute), so Data Quality can show who changed what, when.
+model ObservationRevision {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  observationId String
+  entityId      String
+  metricKey     String
+  period        String
+  oldValue      Float
+  newValue      Float
+  oldDerivation Derivation
+  newDerivation Derivation
+  source        String   // MANUAL | RECALC
+  actorId       String?  // null = system (formula recompute)
+  createdAt     DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation("RevisionActor", fields: [actorId], references: [id])
+
+  @@index([workspaceId, createdAt])
+  @@index([entityId, metricKey, period])
 }
 
 model Report {

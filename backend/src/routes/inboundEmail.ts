@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createHash } from 'crypto';
 import multer from 'multer';
 import { prisma } from '../prisma';
 import { config, hasStorage } from '../config';
@@ -125,6 +126,27 @@ router.post(
         continue;
       }
 
+      // Duplicate detection: the same file already in this workspace is not
+      // re-ingested — the sender gets no error, the trail records the skip.
+      const contentHash = createHash('sha256').update(att.buffer).digest('hex');
+      const duplicate = await prisma.document.findFirst({
+        where: { workspaceId: ws.id, contentHash, deletedAt: null },
+        select: { id: true, name: true },
+      });
+      if (duplicate) {
+        rejected.push({ file: att.name, reason: `Duplicate of “${duplicate.name}” — already in this workspace.` });
+        await audit({
+          workspaceId: ws.id,
+          actorId: null,
+          action: 'document.duplicate_rejected',
+          targetType: 'document',
+          targetId: duplicate.id,
+          meta: { name: att.name, from, subject, via: 'email' },
+          ip: req.ip,
+        });
+        continue;
+      }
+
       const doc = await prisma.document.create({
         data: {
           workspaceId: ws.id,
@@ -143,6 +165,7 @@ router.post(
           // Triage: unassigned + flagged, so the Data Room inbox can prompt for
           // confirm (tag to company) or dismiss.
           assignmentStatus: 'NEEDS_CONFIRMATION',
+          contentHash,
         },
       });
 

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createHash } from 'crypto';
 import multer from 'multer';
 import { z } from 'zod';
 import { prisma } from '../prisma';
@@ -49,6 +50,23 @@ router.post(
         continue;
       }
 
+      // Duplicate detection: identical bytes already in this workspace → skip
+      // with a pointer to the existing document, never a silent second copy.
+      const contentHash = createHash('sha256').update(file.buffer).digest('hex');
+      const duplicate = await prisma.document.findFirst({
+        where: { workspaceId: req.ws!.id, contentHash, deletedAt: null },
+        select: { id: true, name: true },
+      });
+      if (duplicate) {
+        rejected.push({ file: file.originalname, reason: `Duplicate of “${duplicate.name}” — already uploaded to this workspace.` });
+        await audit({
+          workspaceId: req.ws!.id, actorId: req.auth!.userId, action: 'document.duplicate_rejected',
+          targetType: 'document', targetId: duplicate.id, meta: { name: file.originalname, sizeBytes: file.size },
+          ip: req.ip,
+        });
+        continue;
+      }
+
       const doc = await prisma.document.create({
         data: {
           workspaceId: req.ws!.id,
@@ -60,6 +78,7 @@ router.post(
           status: 'UPLOADING',
           storageKey: 'pending',
           ownerId: req.auth!.userId,
+          contentHash,
         },
       });
 

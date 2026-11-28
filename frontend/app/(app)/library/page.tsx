@@ -719,8 +719,15 @@ function UploadModal({ open, onClose, workspaceId, collections, defaultCollectio
             {result.documents.length} uploaded — processing started
           </div>
           {result.rejected.length ? (
-            <div className="badge badge-warning" style={{ alignSelf: 'flex-start' }}>
-              {result.rejected.length} file{result.rejected.length === 1 ? '' : 's'} skipped (unsupported type)
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+              <div className="badge badge-warning">
+                {result.rejected.length} file{result.rejected.length === 1 ? '' : 's'} skipped
+              </div>
+              <ul style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0, paddingLeft: 18 }}>
+                {result.rejected.map((r, i) => (
+                  <li key={i}><strong>{r.file}</strong> — {r.reason}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
           <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>

@@ -128,4 +128,41 @@ router.get(
   }),
 );
 
+// Revision history: every real overwrite of a stored metric figure — manual
+// edit or formula recompute — newest first, with entity and actor names.
+router.get(
+  '/workspaces/:workspaceId/quality/revisions',
+  requireAuth,
+  requireWorkspace('VIEWER'),
+  asyncH(async (req, res) => {
+    const revisions = await prisma.observationRevision.findMany({
+      where: { workspaceId: req.ws!.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { user: { select: { firstName: true, lastName: true } } },
+    });
+    const entityIds = [...new Set(revisions.map((r) => r.entityId))];
+    const entities = entityIds.length
+      ? await prisma.entity.findMany({ where: { id: { in: entityIds } }, select: { id: true, name: true } })
+      : [];
+    const names = new Map(entities.map((e) => [e.id, e.name]));
+    res.json({
+      revisions: revisions.map((r) => ({
+        id: r.id,
+        entityId: r.entityId,
+        entityName: names.get(r.entityId) ?? 'Unknown',
+        metricKey: r.metricKey,
+        period: r.period,
+        oldValue: r.oldValue,
+        newValue: r.newValue,
+        oldDerivation: r.oldDerivation,
+        newDerivation: r.newDerivation,
+        source: r.source,
+        actor: r.user ? `${r.user.firstName} ${r.user.lastName}` : null,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+  }),
+);
+
 export default router;
