@@ -46,6 +46,9 @@ Auto-deploys from `main`. No new env vars.
 - `INBOUND_EMAIL_DOMAIN` (default `in.lumen.app`) and
   `INBOUND_EMAIL_WEBHOOK_SECRET` — needed for email ingestion
   (`20261127120000`+). Set at the email provider's webhook too.
+- `MAX_WORKSPACE_STORAGE_MB` (optional, default `5000`) — aggregate
+  per-workspace storage cap, enforced at every intake point (upload, folder
+  import, inbound email). Raise it if workspaces legitimately need more.
 
 ## 5. Post-deploy smoke checks
 

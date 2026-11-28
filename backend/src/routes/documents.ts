@@ -7,7 +7,7 @@ import { config, hasStorage } from '../config';
 import { ApiError, asyncH } from '../middleware/error';
 import { requireAuth, requireWorkspace, assertDocAccess } from '../middleware/auth';
 import { audit, paginate, pageMeta } from '../utils';
-import { putObject, presignedDownloadUrl, storageKey, storageMode, dbGetObject, verifyFileToken } from '../services/storage';
+import { assertStorageQuota, putObject, presignedDownloadUrl, storageKey, storageMode, dbGetObject, verifyFileToken } from '../services/storage';
 import { enqueue } from '../services/queue';
 import { SUPPORTED_EXTENSIONS, extOf } from '../services/parsers';
 
@@ -42,6 +42,10 @@ router.post(
 
     const created = [];
     const rejected: { file: string; reason: string }[] = [];
+
+    // Aggregate quota check for the whole request — nothing is stored if the
+    // workspace is already over its cap.
+    await assertStorageQuota(req.ws!.id, files.reduce((sum, f) => sum + f.size, 0));
 
     for (const file of files) {
       const ext = extOf(file.originalname);
@@ -164,6 +168,11 @@ router.post(
 
     // The picked directory's own name — every path's first segment.
     const root = intakeSegments(String((paths as string[])[0] ?? ''))[0] || 'Folder import';
+
+    // Aggregate quota check for the whole import — BEFORE creating the batch,
+    // so an over-cap workspace doesn't leave an empty orphan IntakeBatch in
+    // the pending-imports resume list.
+    await assertStorageQuota(req.ws!.id, files.reduce((sum, f) => sum + f.size, 0));
 
     const batch = await prisma.intakeBatch.create({
       data: { workspaceId: req.ws!.id, name: root, status: 'PENDING', createdById: req.auth!.userId },

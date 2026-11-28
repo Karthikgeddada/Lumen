@@ -52,6 +52,9 @@ export const config = {
     bucket: process.env.STORAGE_BUCKET || '',
     accessKey: process.env.STORAGE_ACCESS_KEY || '',
     secretKey: process.env.STORAGE_SECRET_KEY || '',
+    // Aggregate per-workspace cap, enforced at every intake point (upload,
+    // folder import, inbound email) before any bytes are stored or counted.
+    maxWorkspaceBytes: num(process.env.MAX_WORKSPACE_STORAGE_MB, 5000) * 1024 * 1024,
   },
 
   inboundEmail: {

@@ -9,6 +9,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { Readable } from 'stream';
 import { config } from '../config';
 import { prisma } from '../prisma';
+import { ApiError } from '../middleware/error';
 
 // Storage mode: 's3' when STORAGE_* S3/R2 vars are set (or STORAGE_DRIVER=s3);
 // otherwise 'db' — files are stored in the Postgres database itself.
@@ -21,6 +22,33 @@ const useDb =
 
 export function storageMode(): 's3' | 'db' {
   return useDb ? 'db' : 's3';
+}
+
+// ── Workspace storage quota ────────────────────────────────────────────
+// Aggregate cap (config.storage.maxWorkspaceBytes) checked before any bytes
+// are stored or counted, at every intake point: browser upload, folder
+// import staging, and inbound-email attachments. Upload/import fail the
+// request with QUOTA_EXCEEDED; inbound email skips the attachment (a rejected
+// webhook would just make the provider redeliver the same oversized mail).
+
+export async function workspaceHasStorage(workspaceId: string, additionalBytes: number): Promise<boolean> {
+  const ws = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { storageUsedBytes: true },
+  });
+  // Workspace existence/membership is enforced by the callers' middleware.
+  return Number(ws?.storageUsedBytes ?? 0) + additionalBytes <= config.storage.maxWorkspaceBytes;
+}
+
+export async function assertStorageQuota(workspaceId: string, additionalBytes: number): Promise<void> {
+  if (!(await workspaceHasStorage(workspaceId, additionalBytes))) {
+    const mb = Math.round(config.storage.maxWorkspaceBytes / 1024 / 1024);
+    throw new ApiError(
+      413,
+      'QUOTA_EXCEEDED',
+      `This workspace has reached its storage limit (${mb} MB). Delete some documents or raise MAX_WORKSPACE_STORAGE_MB.`,
+    );
+  }
 }
 
 // Works with any S3-compatible object storage (AWS S3, R2, B2, MinIO…).

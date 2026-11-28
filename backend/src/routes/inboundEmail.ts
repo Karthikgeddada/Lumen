@@ -5,7 +5,7 @@ import { prisma } from '../prisma';
 import { config, hasStorage } from '../config';
 import { ApiError, asyncH } from '../middleware/error';
 import { audit } from '../utils';
-import { putObject, storageKey, storageMode } from '../services/storage';
+import { putObject, storageKey, storageMode, workspaceHasStorage } from '../services/storage';
 import { enqueue } from '../services/queue';
 import { SUPPORTED_EXTENSIONS, extOf } from '../services/parsers';
 
@@ -142,6 +142,22 @@ router.post(
           targetType: 'document',
           targetId: duplicate.id,
           meta: { name: att.name, from, subject, via: 'email' },
+          ip: req.ip,
+        });
+        continue;
+      }
+
+      // Storage quota: skip the attachment instead of rejecting the webhook —
+      // a non-2xx would just make the provider redeliver the same mail.
+      if (!(await workspaceHasStorage(ws.id, att.buffer.length))) {
+        rejected.push({ file: att.name, reason: 'Workspace storage limit reached — attachment not saved.' });
+        await audit({
+          workspaceId: ws.id,
+          actorId: null,
+          action: 'document.quota_rejected',
+          targetType: 'workspace',
+          targetId: ws.id,
+          meta: { name: att.name, from, subject, sizeBytes: att.buffer.length },
           ip: req.ip,
         });
         continue;
