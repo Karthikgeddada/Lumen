@@ -89,13 +89,15 @@ export function Shell({ children }: { children: ReactNode }) {
     { section: 'Overview', items: [{ href: '/dashboard', label: 'Dashboard', icon: LayoutGrid }] },
     {
       // Per the page spec: Borrowers is a landing page (opened from Portfolio
-      // or the Data Room, never a sidebar item); Certificates becomes a tab
-      // inside Covenants; Reports stays hidden until it exists.
+      // or the Data Room, never a sidebar item); Certificates is a tab pair
+      // with Covenants (not a sidebar item); Reports is un-hidden now that it
+      // exists.
       section: 'Monitoring',
       items: [
         { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
         { href: '/covenants', label: 'Covenants', icon: Scale },
         { href: '/analytics', label: 'Analytics', icon: LineChart },
+        { href: '/reports', label: 'Reports', icon: FileBarChart },
       ],
     },
     {

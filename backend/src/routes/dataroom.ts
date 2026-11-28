@@ -10,13 +10,13 @@ import { computePackage, lastNQuarters } from '../services/borrowers';
 // Capped: up to 200 companies and 25 package rows per company — large
 // portfolios page at the company level rather than growing this payload.
 
-const router = Router({ mergeParams: true }); // inherit :workspaceId from the app.use mount
+const router = Router({ mergeParams: true }); // route carries :workspaceId itself; mounted at /api
 
 const MAX_ENTITIES = 200;
 const MAX_PACKAGE_ROWS = 25;
 
 router.get(
-  '/tree',
+  '/workspaces/:workspaceId/dataroom/tree',
   requireAuth,
   requireWorkspace('VIEWER'),
   asyncH(async (req, res) => {

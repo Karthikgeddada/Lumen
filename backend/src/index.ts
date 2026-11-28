@@ -20,7 +20,9 @@ import notificationRoutes from './routes/notifications';
 import covenantRoutes from './routes/covenants';
 import qualityRoutes from './routes/quality';
 import inboundEmailRoutes from './routes/inboundEmail';
-import dataroomRoutes from './routes/dataroom';
+import { dataroomRoutes } from './routes/dataroom';
+import certificateRoutes from './routes/certificates';
+import reportRoutes from './routes/reports';
 
 const app = express();
 
@@ -72,7 +74,14 @@ app.use('/api', generalLimiter, extractionRoutes);
 app.use('/api', generalLimiter, questionnaireRoutes);
 app.use('/api', generalLimiter, analyticsRoutes);
 app.use('/api', generalLimiter, borrowerRoutes);
+// Same router, full-prefix form: the Data Room calls
+// /api/workspaces/:workspaceId/borrowers/... while the borrower pages call
+// /api/:workspaceId/borrowers/... — both mounts serve the same routes and
+// share nothing with workspaceRoutes (which defines no /borrowers paths).
+app.use('/api/workspaces', generalLimiter, borrowerRoutes);
 app.use('/api', generalLimiter, dataroomRoutes);
+app.use('/api', generalLimiter, certificateRoutes);
+app.use('/api', generalLimiter, reportRoutes);
 app.use('/api', generalLimiter, covenantRoutes);
 app.use('/api', generalLimiter, qualityRoutes);
 app.use('/api', generalLimiter, dashboardRoutes);
