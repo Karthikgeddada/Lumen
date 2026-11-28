@@ -34,19 +34,19 @@ echarts.use([
 
 // Colors from app/globals.css — keep in sync.
 export const CHART = {
-  blue: '#1c4fd8',
-  blueDark: '#1740b5',
-  blueLight: '#b9caed',
-  blueTint: '#e9f0fc',
-  success: '#0a7d4d',
-  successBg: '#e2f4e9',
-  warning: '#a15c07',
-  warningBg: '#fbf1de',
-  error: '#bb2d23',
-  errorBg: '#fbeae8',
-  textMuted: '#70809a',
+  blue: '#0071e3',
+  blueDark: '#0062c4',
+  blueLight: '#a9cffa',
+  blueTint: '#eaf3ff',
+  success: '#1d9e44',
+  successBg: '#e7f5ec',
+  warning: '#b7791f',
+  warningBg: '#fff3dd',
+  error: '#d93025',
+  errorBg: '#fdebe9',
+  textMuted: '#6e6e73',
   surface: '#ffffff',
-  hairline: '#dde3ec',
+  hairline: '#e8e8ed',
 };
 
 // A small shared base so every chart on the site feels the same: modest

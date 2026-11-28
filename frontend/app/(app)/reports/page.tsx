@@ -38,7 +38,7 @@ const STATUS_COLOR: Record<string, string> = {
   PASS: 'rgba(46,160,67,.15)',
   FAIL: 'rgba(220,38,38,.12)',
   NOT_TESTED: 'var(--sunken)',
-  WAIVED: 'rgba(28,79,216,.12)',
+  WAIVED: 'rgba(0,113,227,.12)',
 };
 const STATUS_TEXT: Record<string, string> = {
   PASS: '#2ea043',

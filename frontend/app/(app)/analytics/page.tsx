@@ -37,7 +37,7 @@ interface SavedView {
   createdAt: string;
 }
 
-const SERIES_COLORS = ['#1c4fd8', '#0e9c8a', '#8b5cf6', '#d97706', '#e05780', '#5a6acf', '#64748b'];
+const SERIES_COLORS = ['#0071e3', '#0e9c8a', '#8b5cf6', '#d97706', '#e05780', '#5a6acf', '#64748b'];
 
 export default function Analytics() {
   const { workspace, can } = useWorkspace();
@@ -194,7 +194,7 @@ function TrendOverview({ metrics }: { metrics: Overview['metrics'] }) {
       trigger: 'axis',
       backgroundColor: CHART.surface,
       borderColor: CHART.hairline,
-      textStyle: { color: '#0e1b2c', fontSize: 12 },
+      textStyle: { color: '#1d1d1f', fontSize: 12 },
       formatter: (params: unknown) => {
         const arr = Array.isArray(params) ? params : [params];
         const rows = (arr as { seriesName: string; dataIndex: number; marker: string }[])
@@ -259,7 +259,7 @@ function MetricCard({ metric, quarters }: { metric: Overview['metrics'][number];
       axisPointer: { type: 'shadow' },
       backgroundColor: CHART.surface,
       borderColor: CHART.hairline,
-      textStyle: { color: '#0e1b2c', fontSize: 12 },
+      textStyle: { color: '#1d1d1f', fontSize: 12 },
       formatter: (params: unknown) => {
         const p = Array.isArray(params) ? params[0] : params;
         const s = series[(p as { dataIndex: number }).dataIndex];
@@ -435,7 +435,7 @@ function Explore({ wid, entities, can }: { wid?: string; entities: Entity[]; can
       trigger: 'axis' as const,
       backgroundColor: CHART.surface,
       borderColor: CHART.hairline,
-      textStyle: { color: '#0e1b2c', fontSize: 12 },
+      textStyle: { color: '#1d1d1f', fontSize: 12 },
     };
     if (d.recommendation.type === 'INDEX') {
       const nameOf = (s: ExploreSeries) => (multiEnt ? `${s.entityName} · ${s.label}` : s.label);

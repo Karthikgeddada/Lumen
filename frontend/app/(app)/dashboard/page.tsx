@@ -69,7 +69,7 @@ function CovenantDonut({ covenants }: { covenants: CovenantBoardItem[] }) {
       trigger: 'item',
       backgroundColor: CHART.surface,
       borderColor: CHART.hairline,
-      textStyle: { color: '#0e1b2c', fontSize: 12 },
+      textStyle: { color: '#1d1d1f', fontSize: 12 },
       formatter: (p: unknown) => {
         const { name, value, percent } = p as { name: string; value: number; percent: number };
         return `<b>${name}</b>: ${value} of ${total} (${percent}%)`;
