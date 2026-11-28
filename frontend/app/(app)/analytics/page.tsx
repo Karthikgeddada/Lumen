@@ -378,7 +378,7 @@ function NewReport({ open, onClose, workspaceId, entityId, entities, onCreated }
 // get the recommended chart with its reasoning ("Why this chart?"), and save
 // the view for one-click reload. Saved views store the question, not a frozen
 // picture — the chart re-recommends itself every load.
-function Explore({ wid, entities, can }: { wid?: string; entities: Entity[]; can: (r: string) => boolean }) {
+function Explore({ wid, entities, can }: { wid?: string; entities: Entity[]; can: (r: 'VIEWER' | 'REVIEWER' | 'EDITOR' | 'ADMIN') => boolean }) {
   const [entityIds, setEntityIds] = useState<string[]>([]); // [] → default first company
   const [metricKeys, setMetricKeys] = useState<string[]>([]); // [] → all metrics
   const [quarters, setQuarters] = useState(4);
