@@ -43,7 +43,7 @@ router.get(
         where: { entity: { workspaceId: wid } },
       }),
       prisma.document.findMany({
-        where: { workspaceId: wid, deletedAt: null },
+        where: { workspaceId: wid, deletedAt: null, status: { not: 'STAGED' } },
         select: {
           id: true, name: true, status: true, pageCount: true, processedAt: true,
           _count: { select: { sections: true, tables: true, chunks: true } },

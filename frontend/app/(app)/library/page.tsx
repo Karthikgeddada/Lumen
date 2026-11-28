@@ -96,6 +96,9 @@ export default function Library() {
   const [newCollectionKind, setNewCollectionKind] = useState<'CUSTOM' | 'PERIOD'>('CUSTOM');
   const [newCollectionPeriod, setNewCollectionPeriod] = useState('');
   const [addCompanyOpen, setAddCompanyOpen] = useState(false);
+  // Folder import: the staging modal + which pending batch to resume.
+  const [importOpen, setImportOpen] = useState(false);
+  const [resumeBatch, setResumeBatch] = useState<string | null>(null);
 
   const { data, isLoading, mutate, error } = useSWR(key, (k: string) => api<{ documents: Doc[]; meta: { total: number; page: number; pages: number } }>(k), {
     refreshInterval: 8000,
@@ -108,6 +111,11 @@ export default function Library() {
   const { data: treeData, isLoading: treeLoading, mutate: refetchTree } = useSWR(
     wid ? `/api/workspaces/${wid}/dataroom/tree` : null,
     (k: string) => api<TreeData>(k),
+  );
+  // Staged folder imports waiting for a confirm decision — listed in Add.
+  const { data: pendingImports, mutate: refetchImports } = useSWR(
+    wid ? `imports-${wid}` : null,
+    (k: string) => api<{ batches: { id: string; name: string; createdAt: string; files: number }[] }>(`/api/workspaces/${wid}/documents/folder-import`),
   );
   // Workspace detail — carries the dedicated inbound email address.
   const { data: wsData } = useSWR(
@@ -163,6 +171,15 @@ export default function Library() {
                   <MenuItem label="Add subsidiary" onClick={() => { setAddOpen(false); setAddCompanyOpen(true); }} />
                   <MenuItem label="New folder" onClick={() => { setAddOpen(false); setNewCollectionOpen(true); }} />
                   <MenuItem label="Upload documents" onClick={() => { setAddOpen(false); setUploadOpen(true); }} />
+                  <MenuItem label="Import folder" onClick={() => { setAddOpen(false); setResumeBatch(null); setImportOpen(true); }} />
+                  {pendingImports?.batches?.length ? (
+                    <div style={{ borderTop: '1px solid var(--border, #e5e5e5)', marginTop: 4, paddingTop: 4 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 10px 4px' }}>Staged imports — confirm or discard</div>
+                      {pendingImports.batches.map((b) => (
+                        <MenuItem key={b.id} label={`“${b.name}” · ${b.files} files`} onClick={() => { setAddOpen(false); setResumeBatch(b.id); setImportOpen(true); }} />
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </>
@@ -498,6 +515,17 @@ export default function Library() {
         onUploaded={() => { mutate(); refetchColls(); }}
       />
 
+      {/* Folder import modal — staged with a preview + confirm gate */}
+      <ImportFolderModal
+        open={importOpen}
+        onClose={() => { setImportOpen(false); setResumeBatch(null); refetchImports(); }}
+        workspaceId={wid}
+        entities={treeData?.entities ?? []}
+        collections={collData?.collections ?? []}
+        resumeBatchId={resumeBatch}
+        onDone={() => { mutate(); refetchColls(); refetchTree(); refetchImports(); }}
+      />
+
       {/* New folder modal — custom or period folder, optionally scoped to a company */}
       <Modal open={newCollectionOpen} onClose={() => setNewCollectionOpen(false)} title="New folder">
         <form
@@ -790,5 +818,213 @@ function UploadModal({ open, onClose, workspaceId, collections, defaultCollectio
         </>
       )}
     </Modal>
+  );
+}
+
+
+// ── Folder import: pick → stage → preview → confirm ────────────────────
+// A directory pick uploads into a staging batch — stored and deduped, but
+// held out of the Data Room until the user reviews the tree preview and
+// confirms where it lands. Discard drops it (and its storage) cleanly.
+interface PreviewNode {
+  name: string; path: string;
+  files: { id: string; name: string; sizeBytes: number }[];
+  folders: PreviewNode[];
+}
+interface ImportPreview {
+  batch: { id: string; name: string; createdAt: string; status: string };
+  tree: PreviewNode;
+  files: number;
+  totalBytes: number;
+  rejected: { file: string; reason: string }[];
+}
+
+const IMPORT_EXTS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt'];
+const IMPORT_MAX_FILES = 200;
+
+function ImportFolderModal({ open, onClose, workspaceId, entities, collections, resumeBatchId, onDone }: {
+  open: boolean; onClose: () => void; workspaceId?: string;
+  entities: TreeEntity[]; collections: Collection[];
+  resumeBatchId: string | null; onDone: () => void;
+}) {
+  const [picked, setPicked] = useState<{ file: File; path: string }[]>([]);
+  const [batch, setBatch] = useState<ImportPreview | null>(null);
+  const [staging, setStaging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [entityId, setEntityId] = useState('');
+  const [folderId, setFolderId] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // The directory picker attribute is non-standard; set it on the raw node.
+  useEffect(() => {
+    if (inputRef.current) inputRef.current.setAttribute('webkitdirectory', '');
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setPicked([]); setBatch(null); setError(null); setEntityId(''); setFolderId('');
+      // Resuming: jump straight to the preview of the pending batch.
+      if (resumeBatchId && workspaceId) {
+        api<ImportPreview>(`/api/workspaces/${workspaceId}/documents/folder-import/${resumeBatchId}`)
+          .then(setBatch)
+          .catch((err) => setError(err instanceof Error ? err.message : 'Could not load the import preview.'));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, resumeBatchId]);
+
+  function onPick(list: FileList | null) {
+    if (!list) return;
+    const out: { file: File; path: string }[] = [];
+    for (const f of Array.from(list)) {
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+      const ext = rel.slice(rel.lastIndexOf('.') + 1).toLowerCase();
+      if (IMPORT_EXTS.includes(ext)) out.push({ file: f, path: rel });
+    }
+    setPicked(out.slice(0, IMPORT_MAX_FILES));
+  }
+
+  async function stage() {
+    if (!workspaceId || !picked.length) return;
+    setStaging(true); setError(null);
+    try {
+      const fd = new FormData();
+      for (const p of picked) fd.append('files', p.file);
+      fd.append('paths', JSON.stringify(picked.map((p) => p.path)));
+      const res = await api<{ batchId: string; name: string; staged: number; rejected: { file: string; reason: string }[] }>(
+        `/api/workspaces/${workspaceId}/documents/folder-import`,
+        { method: 'POST', body: fd },
+      );
+      setPicked([]);
+      setBatch(await api<ImportPreview>(`/api/workspaces/${workspaceId}/documents/folder-import/${res.batchId}`));
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Staging failed.');
+    } finally {
+      setStaging(false);
+    }
+  }
+
+  async function confirm() {
+    if (!workspaceId || !batch) return;
+    setBusy(true); setError(null);
+    try {
+      await api(`/api/workspaces/${workspaceId}/documents/folder-import/${batch.batch.id}/confirm`, {
+        method: 'POST',
+        body: { entityId: entityId || null, collectionId: folderId || null },
+      });
+      onDone(); onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not confirm the import.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function discard() {
+    if (!workspaceId || !batch) return;
+    setBusy(true); setError(null);
+    try {
+      await api(`/api/workspaces/${workspaceId}/documents/folder-import/${batch.batch.id}`, { method: 'DELETE' });
+      onDone(); onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not discard the import.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Destination folders: the picked company's own folders, or workspace-level
+  // folders when no company is chosen.
+  const destCollections = collections.filter((c) => (entityId ? c.entityId === entityId : !c.entityId));
+
+  return (
+    <Modal open={open} onClose={busy || staging ? () => {} : onClose} title="Import folder" width={560}>
+      <ErrorBanner message={error} />
+      <input ref={inputRef} type="file" multiple style={{ display: 'none' }}
+        onChange={(e) => { onPick(e.target.files); e.target.value = ''; }} />
+      {batch ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
+              <strong>{batch.batch.name}</strong> — {batch.files} file{batch.files === 1 ? '' : 's'} · {formatBytes(batch.totalBytes)} staged.
+              Nothing enters the Data Room until you confirm.
+            </div>
+            <div style={{ maxHeight: 220, overflow: 'auto', border: '1px solid var(--border, #e5e5e5)', borderRadius: 8, padding: '8px 12px', fontSize: 12.5 }}>
+              <PreviewTree node={batch.tree} />
+            </div>
+          </div>
+          {batch.rejected?.length ? (
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+              <strong>{batch.rejected.length} skipped:</strong>{' '}
+              {batch.rejected.slice(0, 5).map((r) => `${r.file} — ${r.reason}`).join('; ')}
+              {batch.rejected.length > 5 ? ` …and ${batch.rejected.length - 5} more` : ''}
+            </div>
+          ) : null}
+          <Field label="File under company (optional)" hint="Scoped folders land under the company in the Data Room tree, and its documents are tagged to it.">
+            <select className="select" value={entityId} onChange={(e) => { setEntityId(e.target.value); setFolderId(''); }}>
+              <option value="">No company (workspace level)</option>
+              {entities.map((en) => <option key={en.id} value={en.id}>{en.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Inside folder (optional)" hint="The import's folders are created inside this one. Empty = top level (or the company's own new folder).">
+            <select className="select" value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+              <option value="">Top level</option>
+              {destCollections.map((c) => <option key={c.id} value={c.id}>{folderPath(collections, c.id)}</option>)}
+            </select>
+          </Field>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={discard} disabled={busy} style={{ color: '#c0392b' }}>Discard import</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Decide later</button>
+              <button className="btn btn-primary" onClick={confirm} disabled={busy}>Confirm &amp; process</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div
+            className="dropzone"
+            onClick={() => inputRef.current?.click()}
+            role="button" tabIndex={0}
+            style={{ padding: 28, textAlign: 'center', cursor: 'pointer' }}
+          >
+            <FolderOpen size={22} color="var(--text-muted)" style={{ marginBottom: 10 }} />
+            <div style={{ fontSize: 13.5 }}>Pick a folder to import — its subfolders become Data Room folders.</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+              PDF, DOC, DOCX, XLS, XLSX, CSV, TXT · up to {IMPORT_MAX_FILES} files · duplicates are skipped
+            </div>
+          </div>
+          {picked.length ? (
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+              {picked.length} file{picked.length === 1 ? '' : 's'} · {formatBytes(picked.reduce((n, p) => n + p.file.size, 0))} ready to stage
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={stage} disabled={!picked.length || staging}>
+              {staging ? 'Staging…' : 'Stage for review'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// Recursive preview tree: folders nested, files counted.
+function PreviewTree({ node, depth = 0 }: { node: PreviewNode; depth?: number }) {
+  return (
+    <div style={{ marginLeft: depth ? 14 : 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {depth > 0 ? <FolderOpen size={12} color="var(--text-muted)" /> : null}
+        <span style={{ fontWeight: depth === 0 ? 600 : 500 }}>{node.name}</span>
+        {node.files.length ? (
+          <span style={{ color: 'var(--text-muted)' }}>· {node.files.length} file{node.files.length === 1 ? '' : 's'}</span>
+        ) : null}
+      </div>
+      {node.folders.map((f) => <PreviewTree key={f.path} node={f} depth={depth + 1} />)}
+    </div>
   );
 }

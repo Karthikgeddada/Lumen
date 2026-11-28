@@ -30,6 +30,7 @@ enum InviteStatus {
 }
 
 enum DocumentStatus {
+  STAGED
   UPLOADING
   QUEUED
   PROCESSING
@@ -189,6 +190,7 @@ model Workspace {
   covenantDefinitions CovenantDefinition[]
   observationRevisions ObservationRevision[]
   savedChartViews  SavedChartView[]
+  intakeBatches     IntakeBatch[]
 
   @@index([slug])
 }
@@ -299,6 +301,12 @@ model Document {
   deletedAt    DateTime?
   // sha256 of the file bytes — duplicate detection on upload/email intake.
   contentHash String?
+  // Folder import: this file is staged inside an IntakeBatch (status STAGED,
+  // held out of the Data Room) until a user confirms the destination;
+  // intakePath keeps its position inside the imported folder tree.
+  intakeBatchId String?
+  intakePath     String?
+  intakeBatch    IntakeBatch? @relation(fields: [intakeBatchId], references: [id])
 
   workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   collection Collection?       @relation(fields: [collectionId], references: [id])
@@ -318,6 +326,26 @@ model Document {
   @@index([entityId])
   @@index([workspaceId, name])
   @@index([workspaceId, contentHash])
+  @@index([intakeBatchId])
+}
+
+// A folder import: files staged from one directory pick, held out of the
+// Data Room (Document.status STAGED) until a user reviews the preview and
+// confirms where the folder tree should land. Cancel discards cleanly.
+model IntakeBatch {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String    // root folder name ("Acme 2026 statements")
+  status      String    @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  rejected    Json?     // files skipped at stage time: [{file, reason}]
+  createdById String
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@index([workspaceId, status])
 }
 
 // Structure extracted from a document: headings, paragraphs, footnotes.

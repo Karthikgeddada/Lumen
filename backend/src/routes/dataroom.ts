@@ -44,7 +44,7 @@ router.get(
       }),
       // Unassigned inbox: documents with no company and no folder.
       prisma.document.count({
-        where: { workspaceId: wid, deletedAt: null, entityId: null, collectionId: null },
+        where: { workspaceId: wid, deletedAt: null, entityId: null, collectionId: null, status: { not: 'STAGED' } },
       }),
       // Emailed documents still waiting for a confirm / dismiss decision.
       prisma.document.count({

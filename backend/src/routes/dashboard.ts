@@ -30,7 +30,7 @@ router.get(
       entitiesCount,
       observationsCount,
     ] = await Promise.all([
-      prisma.document.count({ where: { workspaceId: wid, deletedAt: null } }),
+      prisma.document.count({ where: { workspaceId: wid, deletedAt: null, status: { not: 'STAGED' } } }), // staged folder-import files are not in the Data Room yet
       prisma.document.aggregate({
         where: { workspaceId: wid, deletedAt: null, status: 'COMPLETED' },
         _sum: { pageCount: true },
@@ -46,7 +46,7 @@ router.get(
         },
       }),
       prisma.document.findMany({
-        where: { workspaceId: wid, deletedAt: null },
+        where: { workspaceId: wid, deletedAt: null, status: { not: 'STAGED' } },
         orderBy: { uploadedAt: 'desc' },
         take: 6,
         select: {
