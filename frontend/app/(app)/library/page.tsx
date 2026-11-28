@@ -245,7 +245,10 @@ export default function Library() {
                   </button>
                 ))}
                 {/* Folders scoped to the selected company — period folders first, then custom */}
-                {sel.kind === 'entity' && sel.entityId === co.id
+                {/* Show this company's folders while the company is selected, or while
+                    one of its own folders is selected (so the click can toggle back). */}
+                {(sel.kind === 'entity' && sel.entityId === co.id) ||
+                  (sel.kind === 'folder' && entityFolders(co.id).some((pf) => pf.id === sel.collectionId))
                   ? entityFolders(co.id).map((f) => (
                       <button
                         key={f.id}
