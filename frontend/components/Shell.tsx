@@ -8,7 +8,7 @@ import {
   LayoutGrid, Library, MessagesSquare, ClipboardCheck, FileSpreadsheet,
   LineChart, Settings, Search, Bell, ChevronsUpDown, Plus, LogOut,
   Check, FileText, PanelLeftClose, PanelLeftOpen, Scale, Gauge,
-  Briefcase,
+  Briefcase, FileBarChart,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useWorkspace } from '../lib/workspace';
