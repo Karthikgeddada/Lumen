@@ -188,6 +188,7 @@ model Workspace {
   templates       ExtractionTemplate[]
   covenantDefinitions CovenantDefinition[]
   observationRevisions ObservationRevision[]
+  savedChartViews  SavedChartView[]
 
   @@index([slug])
 }
@@ -719,6 +720,22 @@ model Report {
   entity    Entity?   @relation(fields: [entityId], references: [id])
 
   @@index([workspaceId])
+}
+
+// A saved Explore view: dataset + filters (companies, metrics, window),
+// reloadable in one click. The chart itself is re-recommended on load — the
+// saved spec is the question, not a frozen picture.
+model SavedChartView {
+  id          String   @id @default(cuid())
+  workspaceId String
+  title       String
+  spec        Json     // { entityIds: string[], metricKeys: string[], quarters: number }
+  createdById String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
 }
 
 // ── Covenants ────────────────────────────────────────────────────────────

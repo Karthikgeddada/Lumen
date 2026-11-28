@@ -6,7 +6,7 @@ import { requireAuth, requireWorkspace } from '../middleware/auth';
 import { runCovenantTests } from '../services/covenants';
 import { audit } from '../utils';
 import { entityOverview } from '../services/analytics';
-import { seedPackageItems } from '../services/borrowers';
+import { seedPackageItems, lastNQuarters } from '../services/borrowers';
 
 const router = Router();
 
@@ -333,6 +333,160 @@ router.delete(
       throw new ApiError(403, 'FORBIDDEN', 'You do not have permission to perform this action.');
     }
     await prisma.report.delete({ where: { id: report.id } });
+    res.json({ ok: true });
+  }),
+);
+
+// ── Explore tab: dataset + filters, recommended chart, saved views ──────
+
+// Explore dataset: one series per company × metric over the chosen window,
+// plus the rule-based chart recommendation and its "why" — the reasoning
+// ships with the chart instead of being hidden.
+router.get(
+  '/:workspaceId/analytics/explore',
+  requireAuth,
+  requireWorkspace('VIEWER'),
+  asyncH(async (req, res) => {
+    const entityIds = String(req.query.entityIds ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10);
+    if (!entityIds.length) throw new ApiError(400, 'BAD_REQUEST', 'Pick at least one company.');
+    const metricKeys = String(req.query.metricKeys ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 12);
+    const quarters = Math.min(12, Math.max(1, parseInt(String(req.query.quarters ?? '4'), 10) || 4));
+
+    const entities = await prisma.entity.findMany({
+      where: { workspaceId: req.ws!.id, id: { in: entityIds } },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    if (!entities.length) throw new ApiError(404, 'NOT_FOUND', 'Company not found.');
+    const names = new Map(entities.map((e) => [e.id, e.name]));
+    const ids = entities.map((e) => e.id);
+
+    const periods = lastNQuarters(quarters); // oldest → newest
+    const periodIndex = new Map(periods.map((p, i) => [p, i]));
+
+    const [obs, available] = await Promise.all([
+      prisma.metricObservation.findMany({
+        where: {
+          entityId: { in: ids },
+          ...(metricKeys.length ? { metricKey: { in: metricKeys } } : {}),
+          period: { in: periods },
+        },
+        select: {
+          entityId: true, metricKey: true, label: true, unit: true,
+          period: true, value: true, derivation: true, confidence: true,
+        },
+      }),
+      // Every metric available for the picked companies (any period) so the
+      // picker can offer more than the current window holds.
+      prisma.metricObservation.findMany({
+        where: { entityId: { in: ids } },
+        select: { metricKey: true, label: true, unit: true },
+        orderBy: { period: 'desc' },
+        take: 2000,
+      }),
+    ]);
+
+    const bySeries = new Map<
+      string,
+      { entityId: string; entityName: string; metricKey: string; label: string; unit: string; points: { period: string; value: number; derivation: string; confidence: number | null }[] }
+    >();
+    for (const o of obs) {
+      const key = `${o.entityId}|${o.metricKey}`;
+      const s = bySeries.get(key) ?? {
+        entityId: o.entityId,
+        entityName: names.get(o.entityId) ?? 'Unknown',
+        metricKey: o.metricKey,
+        label: o.label,
+        unit: o.unit,
+        points: [],
+      };
+      s.points.push({ period: o.period, value: o.value, derivation: o.derivation, confidence: o.confidence });
+      bySeries.set(key, s);
+    }
+    const series = [...bySeries.values()].map((s) => ({
+      ...s,
+      points: s.points.sort((a, b) => (periodIndex.get(a.period) ?? 0) - (periodIndex.get(b.period) ?? 0)),
+    }));
+
+    // Distinct available metrics — newest label/unit wins.
+    const metricsMap = new Map<string, { key: string; label: string; unit: string }>();
+    for (const a of available) {
+      if (!metricsMap.has(a.metricKey)) metricsMap.set(a.metricKey, { key: a.metricKey, label: a.label, unit: a.unit });
+    }
+
+    const metricCount = new Set(series.map((s) => s.metricKey)).size;
+    const entityCount = new Set(series.map((s) => s.entityId)).size;
+    const latest = periods[periods.length - 1];
+    const recommendation =
+      series.length === 0
+        ? { type: 'NONE', why: 'No stored figures match this selection yet — widen the window, pick another company, or add reported figures.' }
+        : metricCount > 1
+          ? { type: 'INDEX', why: `Several metrics (${metricCount}) — each line is indexed to its first quarter (100), so different units share one scale. Hover for the real values.` }
+          : quarters === 1
+            ? { type: 'BAR', why: `One metric across ${entityCount} ${entityCount === 1 ? 'company' : 'companies'} for ${latest} — bars compare levels directly.` }
+            : { type: 'LINE', why: "One metric over time — lines show each company's trajectory, and the shared unit keeps them comparable." };
+
+    res.json({ series, periods, recommendation, metrics: [...metricsMap.values()] });
+  }),
+);
+
+// Saved views — the dataset + filters of an Explore chart, reloadable in one
+// click. The chart type is re-recommended on load, so views never go stale.
+router.get(
+  '/:workspaceId/analytics/views',
+  requireAuth,
+  requireWorkspace('VIEWER'),
+  asyncH(async (req, res) => {
+    const views = await prisma.savedChartView.findMany({
+      where: { workspaceId: req.ws!.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    res.json({ views });
+  }),
+);
+
+const chartSpecSchema = z.object({
+  entityIds: z.array(z.string()).min(1).max(10),
+  metricKeys: z.array(z.string().trim().min(1).max(80)).max(12).default([]),
+  quarters: z.number().int().min(1).max(12).default(4),
+});
+
+router.post(
+  '/:workspaceId/analytics/views',
+  requireAuth,
+  requireWorkspace('EDITOR'),
+  asyncH(async (req, res) => {
+    const body = z.object({ title: z.string().trim().min(1).max(120), spec: chartSpecSchema }).parse(req.body);
+    const entities = await prisma.entity.findMany({
+      where: { workspaceId: req.ws!.id, id: { in: body.spec.entityIds } },
+      select: { id: true },
+    });
+    if (entities.length !== body.spec.entityIds.length) {
+      throw new ApiError(404, 'NOT_FOUND', 'Company not found.');
+    }
+    const view = await prisma.savedChartView.create({
+      data: { workspaceId: req.ws!.id, title: body.title, spec: body.spec, createdById: req.auth!.userId },
+    });
+    await audit({ workspaceId: req.ws!.id, actorId: req.auth!.userId, action: 'view.saved', targetType: 'saved_chart_view', targetId: view.id, meta: { title: body.title } });
+    res.status(201).json({ view });
+  }),
+);
+
+router.delete(
+  '/analytics/views/:viewId',
+  requireAuth,
+  asyncH(async (req, res) => {
+    const view = await prisma.savedChartView.findFirst({ where: { id: req.params.viewId } });
+    if (!view) throw new ApiError(404, 'NOT_FOUND', 'View not found.');
+    const membership = await prisma.membership.findFirst({
+      where: { workspaceId: view.workspaceId, userId: req.auth!.userId, deletedAt: null },
+      select: { role: true },
+    });
+    if (!membership || !['OWNER', 'ADMIN', 'EDITOR'].includes(membership.role)) {
+      throw new ApiError(403, 'FORBIDDEN', 'You do not have permission to perform this action.');
+    }
+    await prisma.savedChartView.delete({ where: { id: view.id } });
     res.json({ ok: true });
   }),
 );
