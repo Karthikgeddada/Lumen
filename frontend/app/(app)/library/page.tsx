@@ -100,6 +100,13 @@ export default function Library() {
   const [importOpen, setImportOpen] = useState(false);
   const [resumeBatch, setResumeBatch] = useState<string | null>(null);
 
+  // Derived document-query params + SWR key (must precede the useSWR that reads it).
+  const hasFilters = Boolean(q || status || sel.kind !== 'all');
+  const selEntity = sel.kind === 'entity' ? sel.entityId : '';
+  const selFolder = sel.kind === 'folder' ? sel.collectionId : '';
+  const entityIdParam = sel.kind === 'unassigned' ? 'none' : selEntity;
+  const key = wid ? `/api/workspaces/${wid}/documents${qs({ q, collectionId: selFolder, entityId: entityIdParam, status, sort })}` : null;
+
   const { data, isLoading, mutate, error } = useSWR(key, (k: string) => api<{ documents: Doc[]; meta: { total: number; page: number; pages: number } }>(k), {
     refreshInterval: 8000,
   });
@@ -135,11 +142,6 @@ export default function Library() {
       .filter((f) => f.entityId === entityId)
       .sort((a, b) => keyOf(a) - keyOf(b) || (b.periodKey ?? '').localeCompare(a.periodKey ?? '') || a.name.localeCompare(b.name));
   };
-  const hasFilters = Boolean(q || status || sel.kind !== 'all');
-  const selEntity = sel.kind === 'entity' ? sel.entityId : '';
-  const selFolder = sel.kind === 'folder' ? sel.collectionId : '';
-  const entityIdParam = sel.kind === 'unassigned' ? 'none' : selEntity;
-  const key = wid ? `/api/workspaces/${wid}/documents${qs({ q, collectionId: selFolder, entityId: entityIdParam, status, sort })}` : null;
 
   return (
     <main className="content">
