@@ -9,6 +9,7 @@ import {
   AlertTriangle, Table2, ChevronRight,
 } from 'lucide-react';
 import { api } from '../../../../lib/api';
+import { useWorkspace } from '../../../../lib/workspace';
 import {
   DocStatusBadge, DemoTag, EmptyState, LoadingBlock, formatBytes, formatDate, timeAgo,
 } from '../../../../components/ui';
@@ -32,13 +33,20 @@ interface DocDetail {
 
 export default function DocumentViewer() {
   const { id } = useParams<{ id: string }>();
+  const { workspace } = useWorkspace();
+  const wid = workspace?.workspace.id;
   const [tab, setTab] = useState<'summary' | 'text' | 'tables'>('summary');
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const { data, isLoading, error } = useSWR(id, (docId: string) => api<{ document: DocDetail }>(`/api/documents/${docId}`));
+  // The documents router is workspace-scoped (/api/workspaces/:wid/documents)
+  // — the bare /api/documents/:id form 404s.
+  const { data, isLoading, error } = useSWR(
+    wid && id ? `doc-${id}` : null,
+    () => api<{ document: DocDetail }>(`/api/workspaces/${wid}/documents/${id}`),
+  );
   const doc = data?.document;
 
-  if (isLoading) return <main className="content"><LoadingBlock label="Loading document…" /></main>;
+  if (!wid || isLoading) return <main className="content"><LoadingBlock label="Loading document…" /></main>;
   if (error || !doc) {
     return (
       <main className="content">
@@ -52,7 +60,7 @@ export default function DocumentViewer() {
   async function download() {
     setDownloadError(null);
     try {
-      const res = await api<{ url: string }>(`/api/documents/${doc!.id}/download`);
+      const res = await api<{ url: string }>(`/api/workspaces/${wid}/documents/${doc!.id}/download`);
       window.open(res.url, '_blank');
     } catch (err) {
       setDownloadError(err instanceof Error ? err.message : 'Download unavailable.');
