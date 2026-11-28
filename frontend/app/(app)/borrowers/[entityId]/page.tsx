@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import useSWR from 'swr';
-import { Building2, Plus, ArrowLeft, Tag, Unlink, Activity, FileText, Network } from 'lucide-react';
+import { Building2, Plus, ArrowLeft, Tag, Unlink, Activity, FileText, Network, Combine } from 'lucide-react';
 import { api } from '../../../../lib/api';
 import { useWorkspace } from '../../../../lib/workspace';
 import { DerivationBadge, DocStatusBadge, EmptyState, ErrorBanner, Field, LoadingBlock, Modal } from '../../../../components/ui';
@@ -49,6 +49,8 @@ export default function BorrowerPage() {
   const [keywords, setKeywords] = useState('');
   const [subOpen, setSubOpen] = useState(false);
   const [subName, setSubName] = useState('');
+  // Group consolidation feedback — what the roll-up did, honestly.
+  const [consMsg, setConsMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -265,11 +267,39 @@ export default function BorrowerPage() {
               <div className="card-title"><Network size={13} style={{ verticalAlign: -2, marginRight: 6 }} />Subsidiaries</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span className="card-sub">tracked under this borrower</span>
+                {editable && data.subsidiaries.length > 0 ? (
+                  <button className="btn btn-secondary btn-sm" disabled={busy} title="Sum subsidiaries' figures onto this company, per metric and period"
+                    onClick={async () => {
+                      setBusy(true); setError(null); setConsMsg(null);
+                      try {
+                        const r = await api<{ consolidated: number; refreshed: number; skipped: { metricKey: string; reason: string }[]; contributors: string[] }>(
+                          `/api/${wid}/analytics/entities/${entityId}/consolidate`,
+                          { method: 'POST' },
+                        );
+                        const bits = [
+                          r.consolidated ? `${r.consolidated} new figure${r.consolidated === 1 ? '' : 's'}` : null,
+                          r.refreshed ? `${r.refreshed} refreshed` : null,
+                          r.skipped.length ? `${r.skipped.length} skipped (not summable / group has its own)` : null,
+                        ].filter(Boolean);
+                        setConsMsg(`Consolidated ${r.contributors.length} compan${r.contributors.length === 1 ? 'y' : 'ies'} — ${bits.join(' · ') || 'no changes needed'}.`);
+                        refetch();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : 'Consolidation failed.');
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}>
+                    <Combine size={13} /> Consolidate group
+                  </button>
+                ) : null}
                 {editable ? (
                   <button className="btn btn-secondary btn-sm" onClick={() => { setSubName(''); setSubOpen(true); }}><Plus size={13} /> Add subsidiary</button>
                 ) : null}
               </div>
             </div>
+            {consMsg ? (
+              <div style={{ padding: '12px 20px 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>{consMsg}</div>
+            ) : null}
             {data.subsidiaries.length === 0 ? (
               <div style={{ padding: 20 }}><EmptyState
                 icon={<Network size={20} />}

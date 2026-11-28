@@ -239,7 +239,7 @@ export default function Quality() {
                           <DerivationBadge d={r.oldDerivation} /> <span style={{ color: 'var(--text-muted)', margin: '0 2px' }}>→</span> <DerivationBadge d={r.newDerivation} />
                         </td>
                         <td style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                          {r.actor ?? (r.source === 'MANUAL' ? 'Manual entry' : 'Formula recompute')} · {timeAgo(r.createdAt)}
+                          {r.actor ?? (r.source === 'MANUAL' ? 'Manual entry' : r.source === 'CONSOLIDATE' ? 'Group consolidation' : 'Formula recompute')} · {timeAgo(r.createdAt)}
                         </td>
                       </tr>
                     ))}

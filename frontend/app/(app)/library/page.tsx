@@ -631,13 +631,15 @@ function AddCompanyModal({ open, onClose, workspaceId, entities, defaultParent, 
     setBusy(true); setError(null);
     try {
       if (mode === 'new') {
-        await api(`/api/workspaces/${workspaceId}/analytics/entities`, {
+        // analytics routes are short-form mounted (/api/:wid/analytics/...) —
+        // the /api/workspaces/:wid/analytics form 404s.
+        await api(`/api/${workspaceId}/analytics/entities`, {
           method: 'POST',
           body: { name: name.trim(), parentId: parentId || undefined },
         });
       } else {
         if (!existingId) { setBusy(false); return; }
-        await api(`/api/workspaces/${workspaceId}/analytics/entities/${existingId}`, {
+        await api(`/api/${workspaceId}/analytics/entities/${existingId}`, {
           method: 'PATCH',
           body: { parentId: parentId || null },
         });

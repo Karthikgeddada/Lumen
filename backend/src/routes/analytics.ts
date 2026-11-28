@@ -7,6 +7,7 @@ import { runCovenantTests } from '../services/covenants';
 import { audit } from '../utils';
 import { entityOverview } from '../services/analytics';
 import { seedPackageItems, lastNQuarters } from '../services/borrowers';
+import { consolidateGroup } from '../services/groups';
 
 const router = Router();
 
@@ -155,6 +156,40 @@ router.patch(
       });
     }
     res.json({ entity: updated });
+  }),
+);
+
+// Consolidate the group: roll subsidiaries' figures up onto this entity, per
+// metric and period. Ratio-like metrics are skipped (not summable), the
+// group's own figures win, and consolidated rows refresh on re-run. The new
+// group figures then flow everywhere — covenants, reports, Explore.
+router.post(
+  '/:workspaceId/analytics/entities/:entityId/consolidate',
+  requireAuth,
+  requireWorkspace('EDITOR'),
+  asyncH(async (req, res) => {
+    const entity = await prisma.entity.findFirst({
+      where: { id: req.params.entityId, workspaceId: req.ws!.id },
+    });
+    if (!entity) throw new ApiError(404, 'NOT_FOUND', 'Entity not found.');
+    const result = await consolidateGroup(entity.id, req.auth!.userId);
+    await audit({
+      workspaceId: req.ws!.id,
+      actorId: req.auth!.userId,
+      action: 'group.consolidated',
+      targetType: 'entity',
+      targetId: entity.id,
+      meta: {
+        consolidated: result.consolidated,
+        refreshed: result.refreshed,
+        skipped: result.skipped.length,
+        contributors: result.contributors.length,
+      },
+      ip: req.ip,
+    });
+    // Group figures may move covenants — retest, best-effort.
+    runCovenantTests(req.ws!.id, entity.id).catch(() => {});
+    res.json(result);
   }),
 );
 
